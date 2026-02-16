@@ -42,6 +42,8 @@ export interface PendingLocalCreate {
 	title: string;
 	description: string;
 	isDone: boolean;
+	isRecurring: boolean;
+	syncSignature: string;
 	projectName?: string;
 	sectionName?: string;
 	dueRaw?: string;
@@ -57,6 +59,8 @@ export interface PendingLocalUpdate {
 	title: string;
 	description: string;
 	isDone: boolean;
+	isRecurring: boolean;
+	syncSignature: string;
 	projectName?: string;
 	sectionName?: string;
 	dueRaw: string;
@@ -188,15 +192,28 @@ export class TaskNoteRepository {
 			const fullContent = await this.app.vault.cachedRead(file);
 			const description = fullContent.replace(/^---[\s\S]*?---\n?/, '').trim();
 			const isDone = getTaskStatus(frontmatter) === 'done';
+			const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
+			const dueRaw = getDueRawForSync(frontmatter);
+			const signature = buildTodoistSyncSignature({
+				title,
+				description,
+				isDone,
+				isRecurring,
+				projectId: toOptionalString(frontmatter.todoist_project_id),
+				sectionId: toOptionalString(frontmatter.todoist_section_id),
+				dueRaw,
+			});
 
 			pending.push({
 				file,
 				title,
 				description,
 				isDone,
+				isRecurring,
+				syncSignature: signature,
 				projectName: toOptionalString(frontmatter.todoist_project_name),
 				sectionName: toOptionalString(frontmatter.todoist_section_name),
-				dueRaw: getDueRawForSync(frontmatter),
+				dueRaw,
 				projectId: toOptionalString(frontmatter.todoist_project_id),
 				sectionId: toOptionalString(frontmatter.todoist_section_id),
 				priority: toOptionalNumber(frontmatter.todoist_priority),
@@ -207,12 +224,13 @@ export class TaskNoteRepository {
 		return pending;
 	}
 
-	async markLocalCreateSynced(file: TFile, todoistId: string): Promise<void> {
+	async markLocalCreateSynced(file: TFile, todoistId: string, syncSignature: string): Promise<void> {
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			data.todoist_id = todoistId;
 			data.todoist_sync_status = 'synced';
+			data.todoist_last_synced_signature = syncSignature;
 			if ('sync_status' in data) {
 				delete data.sync_status;
 			}
@@ -252,8 +270,34 @@ export class TaskNoteRepository {
 			}
 
 			const isDone = getTaskStatus(frontmatter) === 'done';
+			const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
 			const fullContent = await this.app.vault.cachedRead(file);
 			const description = fullContent.replace(/^---[\s\S]*?---\n?/, '').trim();
+			const dueRaw = getDueRawForSync(frontmatter) ?? '';
+			const signature = buildTodoistSyncSignature({
+				title,
+				description,
+				isDone,
+				isRecurring,
+				projectId: toOptionalString(frontmatter.todoist_project_id),
+				sectionId: toOptionalString(frontmatter.todoist_section_id),
+				dueRaw,
+			});
+			const lastSyncedSignature =
+				typeof frontmatter.todoist_last_synced_signature === 'string'
+					? frontmatter.todoist_last_synced_signature
+					: '';
+			if (syncStatus === 'dirty_local' && lastSyncedSignature === signature) {
+				await this.app.fileManager.processFrontMatter(file, (dirtyFrontmatter) => {
+					const data = dirtyFrontmatter as Record<string, unknown>;
+					applyStandardTaskFrontmatter(data, this.settings);
+					data.todoist_sync_status = 'synced';
+					if ('sync_status' in data) {
+						delete data.sync_status;
+					}
+				});
+				continue;
+			}
 
 			pending.push({
 				file,
@@ -261,9 +305,11 @@ export class TaskNoteRepository {
 				title,
 				description,
 				isDone,
+				isRecurring,
+				syncSignature: signature,
 				projectName: toOptionalString(frontmatter.todoist_project_name),
 				sectionName: toOptionalString(frontmatter.todoist_section_name),
-				dueRaw: getDueRawForSync(frontmatter) ?? '',
+				dueRaw,
 				projectId: toOptionalString(frontmatter.todoist_project_id),
 				sectionId: toOptionalString(frontmatter.todoist_section_id),
 			});
@@ -272,11 +318,12 @@ export class TaskNoteRepository {
 		return pending;
 	}
 
-	async markLocalUpdateSynced(file: TFile): Promise<void> {
+	async markLocalUpdateSynced(file: TFile, syncSignature: string): Promise<void> {
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			data.todoist_sync_status = 'synced';
+			data.todoist_last_synced_signature = syncSignature;
 			if ('sync_status' in data) {
 				delete data.sync_status;
 			}
@@ -292,6 +339,20 @@ export class TaskNoteRepository {
 	}
 
 	private async updateTaskFile(file: TFile, item: TodoistItem, maps: ProjectSectionMaps): Promise<UpsertResult & { file: TFile }> {
+		const remoteImportSignature = buildRemoteImportSignature(item, maps);
+		const cachedFrontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const lastImportedSignature =
+			typeof cachedFrontmatter?.todoist_last_imported_signature === 'string'
+				? cachedFrontmatter.todoist_last_imported_signature
+				: '';
+		if (lastImportedSignature === remoteImportSignature) {
+			const existingContent = await this.app.vault.cachedRead(file);
+			const needsDescriptionBackfill = !hasBodyContent(existingContent) && Boolean(item.description?.trim());
+			if (!needsDescriptionBackfill) {
+				return { created: 0, updated: 0, file };
+			}
+		}
+
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
@@ -307,6 +368,16 @@ export class TaskNoteRepository {
 			data.todoist_due = item.due?.date ?? '';
 			data.todoist_due_string = item.due?.string ?? '';
 			data.todoist_is_recurring = Boolean(item.due?.is_recurring);
+			data.todoist_last_imported_signature = remoteImportSignature;
+			data.todoist_last_synced_signature = buildTodoistSyncSignature({
+				title: item.content,
+				description: item.description ?? '',
+				isDone: Boolean(item.checked),
+				isRecurring: Boolean(item.due?.is_recurring),
+				projectId: item.project_id,
+				sectionId: item.section_id ?? undefined,
+				dueRaw: item.due?.is_recurring ? (item.due?.string ?? '') : (item.due?.date ?? ''),
+			});
 			data.todoist_labels = item.labels ?? [];
 			data.todoist_parent_id = item.parent_id ?? '';
 			data.todoist_sync_status = 'synced';
@@ -333,10 +404,17 @@ export class TaskNoteRepository {
 				continue;
 			}
 
+			const parentLink = toWikiLink(parentFile.path);
+			const existingFrontmatter = this.app.metadataCache.getFileCache(childFile)?.frontmatter as Record<string, unknown> | undefined;
+			const existingParent = typeof existingFrontmatter?.parent_task === 'string' ? existingFrontmatter.parent_task : '';
+			if (existingParent === parentLink) {
+				continue;
+			}
+
 			await this.app.fileManager.processFrontMatter(childFile, (frontmatter) => {
 				const data = frontmatter as Record<string, unknown>;
 				applyStandardTaskFrontmatter(data, this.settings);
-				data.parent_task = toWikiLink(parentFile.path);
+				data.parent_task = parentLink;
 			});
 		}
 	}
@@ -450,6 +528,19 @@ function buildNewFileContent(
 		`todoist_due: "${escapeDoubleQuotes(item.due?.date ?? '')}"`,
 		`todoist_due_string: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
 		`todoist_is_recurring: ${item.due?.is_recurring ? 'true' : 'false'}`,
+		`todoist_last_imported_signature: "${escapeDoubleQuotes(buildRemoteImportSignature(item, {
+			projectNameById,
+			sectionNameById,
+		}))}"`,
+		`todoist_last_synced_signature: "${escapeDoubleQuotes(buildTodoistSyncSignature({
+			title: item.content,
+			description: item.description ?? '',
+			isDone: Boolean(item.checked),
+			isRecurring: Boolean(item.due?.is_recurring),
+			projectId: item.project_id,
+			sectionId: item.section_id ?? undefined,
+			dueRaw: item.due?.is_recurring ? (item.due?.string ?? '') : (item.due?.date ?? ''),
+		}))}"`,
 		`todoist_labels: [${(item.labels ?? []).map((label) => toQuotedYamlInline(label)).join(', ')}]`,
 		`todoist_parent_id: "${escapeDoubleQuotes(item.parent_id ?? '')}"`,
 		`todoist_last_imported_at: "${new Date().toISOString()}"`,
@@ -510,9 +601,51 @@ function toStringArray(value: unknown): string[] {
 }
 
 function getDueRawForSync(frontmatter: Record<string, unknown>): string | undefined {
+	const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
+	if (!isRecurring) {
+		return toOptionalString(frontmatter.todoist_due);
+	}
 	const dueString = toOptionalString(frontmatter.todoist_due_string);
 	if (dueString) {
 		return dueString;
 	}
 	return toOptionalString(frontmatter.todoist_due);
+}
+
+function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps): string {
+	return JSON.stringify([
+		item.content,
+		item.description ?? '',
+		item.checked ? 1 : 0,
+		item.project_id,
+		maps.projectNameById.get(item.project_id) ?? 'Unknown',
+		item.section_id ?? '',
+		item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '',
+		item.priority ?? 1,
+		item.due?.date ?? '',
+		item.due?.string ?? '',
+		item.due?.is_recurring ? 1 : 0,
+		item.parent_id ?? '',
+		(item.labels ?? []).join('|'),
+	]);
+}
+
+function buildTodoistSyncSignature(input: {
+	title: string;
+	description: string;
+	isDone: boolean;
+	isRecurring: boolean;
+	projectId?: string;
+	sectionId?: string;
+	dueRaw?: string;
+}): string {
+	return JSON.stringify([
+		input.title.trim(),
+		input.description.trim(),
+		input.isDone ? 1 : 0,
+		input.isRecurring ? 1 : 0,
+		input.projectId?.trim() ?? '',
+		input.sectionId?.trim() ?? '',
+		input.dueRaw?.trim() ?? '',
+	]);
 }

@@ -67,7 +67,7 @@ export class SyncService {
 						dueString,
 					});
 				}
-				await repository.markLocalCreateSynced(pending.file, createdTodoistId);
+				await repository.markLocalCreateSynced(pending.file, createdTodoistId, pending.syncSignature);
 			}
 
 			const pendingLocalUpdates = await repository.listPendingLocalUpdates();
@@ -85,13 +85,14 @@ export class SyncService {
 					content: pending.title,
 					description: pending.description,
 					isDone: pending.isDone,
+					isRecurring: pending.isRecurring,
 					projectId: resolvedProjectId,
 					sectionId: resolvedSectionId,
 					dueDate,
 					dueString,
 					clearDue: !dueDate && !dueString,
 				});
-				await repository.markLocalUpdateSynced(pending.file);
+				await repository.markLocalUpdateSynced(pending.file, pending.syncSignature);
 			}
 
 			snapshot = await todoistClient.fetchSyncSnapshot();

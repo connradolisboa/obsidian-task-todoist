@@ -57,6 +57,7 @@ export interface TodoistTaskUpdateInput {
 	content: string;
 	description?: string;
 	isDone: boolean;
+	isRecurring?: boolean;
 	projectId?: string;
 	sectionId?: string;
 	dueDate?: string;
@@ -171,6 +172,7 @@ export class TodoistClient {
 	async updateTask(input: TodoistTaskUpdateInput): Promise<void> {
 		const commands = [];
 		const updateCommandId = generateUuid();
+		const isRecurringCompletion = Boolean(input.isDone && input.isRecurring);
 		commands.push({
 			type: 'item_update',
 			uuid: updateCommandId,
@@ -180,9 +182,9 @@ export class TodoistClient {
 				description: input.description ?? '',
 				...(input.projectId ? { project_id: input.projectId } : {}),
 				...(input.sectionId ? { section_id: input.sectionId } : {}),
-				...(input.dueDate ? { due: { date: input.dueDate } } : {}),
-				...(input.dueString ? { due: { string: input.dueString } } : {}),
-				...(!input.dueDate && !input.dueString && input.clearDue ? { due: null } : {}),
+				...(isRecurringCompletion ? {} : (input.dueDate ? { due: { date: input.dueDate } } : {})),
+				...(isRecurringCompletion ? {} : (input.dueString ? { due: { string: input.dueString } } : {})),
+				...(isRecurringCompletion ? {} : (!input.dueDate && !input.dueString && input.clearDue ? { due: null } : {})),
 			},
 		});
 
@@ -205,7 +207,11 @@ export class TodoistClient {
 
 		const payload = response.json as TodoistSyncResponse;
 		assertSyncStatusOk(payload, updateCommandId, 'update');
-		assertSyncStatusOk(payload, statusCommandId, input.isDone ? 'close' : 'uncomplete');
+		assertSyncStatusOk(
+			payload,
+			statusCommandId,
+			input.isDone ? 'close' : 'uncomplete',
+		);
 	}
 
 	private async sync(resourceTypes: string[]) {

@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-task-todoist",
 	"name": "Task Notes & Todoist Sync",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.11.4",
 	"description": "Allows task syncing from Todoist, with tasks created as notes.",
 	"author": "symph0nic",
