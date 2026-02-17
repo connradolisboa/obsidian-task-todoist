@@ -115,6 +115,23 @@ export class TaskNoteRepository {
 		return { created, updated };
 	}
 
+	async repairMalformedSignatureFrontmatterLines(): Promise<number> {
+		let repaired = 0;
+		const folderPrefix = `${normalizePath(this.settings.tasksFolderPath)}/`;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (!(file.path === normalizePath(this.settings.tasksFolderPath) || file.path.startsWith(folderPrefix))) {
+				continue;
+			}
+			const content = await this.app.vault.cachedRead(file);
+			const fixed = repairSignatureFrontmatterInContent(content);
+			if (fixed !== content) {
+				await this.app.vault.modify(file, fixed);
+				repaired += 1;
+			}
+		}
+		return repaired;
+	}
+
 	async listSyncedTasks(): Promise<SyncedTaskEntry[]> {
 		const index = await this.buildTodoistIdIndexInTaskFolder();
 		return Array.from(index.entries()).map(([todoistId, file]) => ({ todoistId, file }));
@@ -613,7 +630,7 @@ function getDueRawForSync(frontmatter: Record<string, unknown>): string | undefi
 }
 
 function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps): string {
-	return JSON.stringify([
+	return simpleStableHash(JSON.stringify([
 		item.content,
 		item.description ?? '',
 		item.checked ? 1 : 0,
@@ -627,7 +644,7 @@ function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps)
 		item.due?.is_recurring ? 1 : 0,
 		item.parent_id ?? '',
 		(item.labels ?? []).join('|'),
-	]);
+	]));
 }
 
 function buildTodoistSyncSignature(input: {
@@ -639,7 +656,7 @@ function buildTodoistSyncSignature(input: {
 	sectionId?: string;
 	dueRaw?: string;
 }): string {
-	return JSON.stringify([
+	return simpleStableHash(JSON.stringify([
 		input.title.trim(),
 		input.description.trim(),
 		input.isDone ? 1 : 0,
@@ -647,5 +664,35 @@ function buildTodoistSyncSignature(input: {
 		input.projectId?.trim() ?? '',
 		input.sectionId?.trim() ?? '',
 		input.dueRaw?.trim() ?? '',
-	]);
+	]));
+}
+
+function simpleStableHash(value: string): string {
+	let hash = 2166136261;
+	for (let i = 0; i < value.length; i += 1) {
+		hash ^= value.charCodeAt(i);
+		hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+	}
+	return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function repairSignatureFrontmatterInContent(content: string): string {
+	const frontmatterMatch = content.match(/^---\n[\s\S]*?\n---/);
+	if (!frontmatterMatch) {
+		return content;
+	}
+	const originalFrontmatter = frontmatterMatch[0];
+	let fixedFrontmatter = originalFrontmatter;
+	fixedFrontmatter = fixedFrontmatter.replace(
+		/^todoist_last_imported_signature:.*$/gm,
+		'todoist_last_imported_signature: ""',
+	);
+	fixedFrontmatter = fixedFrontmatter.replace(
+		/^todoist_last_synced_signature:.*$/gm,
+		'todoist_last_synced_signature: ""',
+	);
+	if (fixedFrontmatter === originalFrontmatter) {
+		return content;
+	}
+	return content.replace(originalFrontmatter, fixedFrontmatter);
 }

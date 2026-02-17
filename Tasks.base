@@ -1,39 +1,127 @@
 filters:
   and:
     - file.tags.contains("tasks")
+formulas:
+  Due: if(todoist_due == today(),"Today", if(todoist_due < today() && todoist_due != "", "Overdue",""))
+properties:
+  note.todoist_due:
+    displayName: Due Date
+  note.todoist_project_name:
+    displayName: Project
 views:
   - type: table
     name: Today
     filters:
       and:
         - task_status != "done"
-        - todoist_due == today()
+        - "!formula.Due.isEmpty()"
+    groupBy:
+      property: formula.Due
+      direction: ASC
     order:
-      - file.name
-      - task_title
       - task_done
-      - task_status
+      - file.name
       - todoist_due
       - todoist_project_name
-  - type: table
-    name: All Tasks
-    order:
-      - file.name
       - task_title
-      - task_done
       - task_status
-      - todoist_due
-      - todoist_project_name
-      - todoist_sync_status
+      - formula.Due
+    sort:
+      - property: formula.Due
+        direction: DESC
   - type: table
     name: Inbox
     filters:
       and:
+        - task_status != "done"
         - todoist_project_name == "Inbox"
+    order:
+      - task_done
+      - file.name
+      - todoist_due
+      - todoist_project_name
+      - task_title
+      - task_status
+  - type: table
+    name: All Open Parent Tasks by Project
+    filters:
+      and:
+        - task_status != "done"
+        - parent_task.isEmpty()
+    groupBy:
+      property: todoist_project_name
+      direction: ASC
+    order:
+      - task_done
+      - file.name
+      - todoist_due
+      - todoist_project_name
+      - task_title
+      - task_status
+      - parent_task
+    sort:
+      - property: todoist_project_name
+        direction: ASC
+      - property: file.name
+        direction: ASC
+      - property: todoist_due
+        direction: ASC
+  - type: table
+    name: All Open Tasks by Project
+    filters:
+      and:
+        - task_status != "done"
+    groupBy:
+      property: todoist_project_name
+      direction: ASC
+    order:
+      - task_done
+      - file.name
+      - todoist_due
+      - todoist_project_name
+      - task_title
+      - task_status
+      - parent_task
+    sort:
+      - property: todoist_project_name
+        direction: ASC
+      - property: file.name
+        direction: ASC
+      - property: todoist_due
+        direction: ASC
+  - type: table
+    name: All Open Subtasks by Parent
+    filters:
+      and:
+        - task_status != "done"
+        - "!parent_task.isEmpty()"
+    groupBy:
+      property: parent_task
+      direction: ASC
+    order:
+      - task_done
+      - file.name
+      - todoist_due
+      - todoist_project_name
+      - task_title
+      - task_status
+      - parent_task
+    sort:
+      - property: parent_task
+        direction: ASC
+      - property: todoist_project_name
+        direction: ASC
+      - property: todoist_due
+        direction: ASC
+  - type: table
+    name: All Open Tasks
+    filters:
+      and:
         - task_status != "done"
     order:
-      - file.name
-      - task_title
       - task_done
-      - task_status
+      - file.name
       - todoist_due
+      - todoist_project_name
+      - task_title
+      - task_status
