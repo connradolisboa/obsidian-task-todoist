@@ -7,7 +7,9 @@ export interface LocalTaskNoteInput {
 	description?: string;
 	parentTaskLink?: string;
 	todoistSync: boolean;
+	todoistProjectId?: string;
 	todoistProjectName?: string;
+	todoistSectionId?: string;
 	todoistSectionName?: string;
 	todoistDueDate?: string;
 	todoistDueString?: string;
@@ -28,6 +30,8 @@ export async function createLocalTaskNote(
 	const isRecurring = Boolean(dueString);
 	const rawProjectName = input.todoistProjectName?.trim() ?? '';
 	const effectiveProjectName = input.todoistSync ? (rawProjectName || 'Inbox') : rawProjectName;
+	const effectiveProjectId = input.todoistProjectId?.trim() ?? '';
+	const effectiveSectionId = input.todoistSectionId?.trim() ?? '';
 	const effectiveSectionName = input.todoistSectionName?.trim() ?? '';
 	const frontmatter = [
 		'---',
@@ -41,7 +45,9 @@ export async function createLocalTaskNote(
 		`task_title: "${escapeDoubleQuotes(input.title)}"`,
 		input.parentTaskLink?.trim() ? `parent_task: "${escapeDoubleQuotes(input.parentTaskLink.trim())}"` : null,
 		`todoist_sync: ${input.todoistSync ? 'true' : 'false'}`,
+		`todoist_project_id: "${escapeDoubleQuotes(effectiveProjectId)}"`,
 		`todoist_project_name: "${escapeDoubleQuotes(effectiveProjectName)}"`,
+		`todoist_section_id: "${escapeDoubleQuotes(effectiveSectionId)}"`,
 		`todoist_section_name: "${escapeDoubleQuotes(effectiveSectionName)}"`,
 		`todoist_due: "${escapeDoubleQuotes(dueDate)}"`,
 		`todoist_due_string: "${escapeDoubleQuotes(dueString)}"`,

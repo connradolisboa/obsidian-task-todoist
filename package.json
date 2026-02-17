@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-task-todoist",
-	"version": "1.0.2",
+	"version": "1.1.0",
 	"description": "Allows task syncing from Todoist, with tasks created as notes.",
 	"main": "main.js",
 	"type": "module",

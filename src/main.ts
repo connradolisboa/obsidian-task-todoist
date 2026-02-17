@@ -5,7 +5,7 @@ import {
 	type TaskTodoistSettings,
 } from './settings';
 import { TaskTodoistSettingTab } from './settings-tab';
-import { TodoistClient } from './todoist-client';
+import { TodoistClient, type TodoistProjectSectionLookup } from './todoist-client';
 import { SyncService } from './sync-service';
 import { CreateTaskModal } from './create-task-modal';
 import { createLocalTaskNote, type LocalTaskNoteInput } from './task-note-factory';
@@ -29,6 +29,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private scheduledSyncIntervalId: number | null = null;
 	private syncInProgress = false;
 	private syncQueued = false;
+	private lookupCache: { expiresAt: number; value: TodoistProjectSectionLookup } | null = null;
 	private static readonly UNCHECKED_TASK_LINE_REGEX = /^(\s*[-*+]\s+\[\s\]\s+)(.+)$/;
 
 	async onload(): Promise<void> {
@@ -65,6 +66,27 @@ export default class TaskTodoistPlugin extends Plugin {
 
 	getLastSyncMessage(): string {
 		return this.lastSyncMessage;
+	}
+
+	async getTodoistProjectSectionLookup(forceRefresh = false): Promise<TodoistProjectSectionLookup> {
+		const now = Date.now();
+		if (!forceRefresh && this.lookupCache && this.lookupCache.expiresAt > now) {
+			return this.lookupCache.value;
+		}
+
+		await this.loadTodoistApiToken();
+		const token = this.todoistApiToken;
+		if (!token) {
+			return { projects: [], sections: [] };
+		}
+
+		const client = new TodoistClient(token);
+		const value = await client.fetchProjectSectionLookup();
+		this.lookupCache = {
+			expiresAt: now + (5 * 60 * 1000),
+			value,
+		};
+		return value;
 	}
 
 	async testTodoistConnection(): Promise<{ ok: boolean; message: string }> {
@@ -194,7 +216,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			todoistSync: true,
 			todoistProjectName: parsed.projectName,
 			todoistSectionName: parsed.sectionName,
-			todoistDueDate: parsed.recurrenceRaw ? '' : parsed.dueRaw,
+			todoistDueDate: parsed.dueRaw,
 			todoistDueString: parsed.recurrenceRaw,
 		});
 		const linkTarget = created.path.replace(/\.md$/i, '');

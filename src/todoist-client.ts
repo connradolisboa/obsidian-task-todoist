@@ -40,6 +40,11 @@ export interface TodoistSyncSnapshot {
 	sections: TodoistSection[];
 }
 
+export interface TodoistProjectSectionLookup {
+	projects: TodoistProject[];
+	sections: TodoistSection[];
+}
+
 export interface TodoistCreateTaskInput {
 	content: string;
 	description?: string;
@@ -105,6 +110,22 @@ export class TodoistClient {
 		return {
 			userId: payload.user?.id == null ? null : String(payload.user.id),
 			items: normalizeItems(payload.items ?? []),
+			projects: normalizeProjects(payload.projects ?? []),
+			sections: normalizeSections(payload.sections ?? []),
+		};
+	}
+
+	async fetchProjectSectionLookup(): Promise<TodoistProjectSectionLookup> {
+		const response = await this.sync(['projects', 'sections']);
+		if (response.status === 401) {
+			throw new Error('Todoist authentication failed. Check your token.');
+		}
+		if (response.status !== 200) {
+			throw new Error(`Todoist project lookup failed with status ${response.status}.`);
+		}
+
+		const payload = response.json as TodoistSyncResponse;
+		return {
 			projects: normalizeProjects(payload.projects ?? []),
 			sections: normalizeSections(payload.sections ?? []),
 		};

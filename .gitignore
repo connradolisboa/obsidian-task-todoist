@@ -23,4 +23,4 @@ data.json
 .DS_Store
 
 # Exclude local copy script
-update-plugin-todoist.ps1
+*.ps1

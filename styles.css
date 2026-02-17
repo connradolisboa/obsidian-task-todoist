@@ -55,3 +55,40 @@
 	white-space: nowrap;
 	line-height: 1.1;
 }
+
+.task-todoist-parse-hint {
+	margin: 0.25rem 0 0.5rem;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.task-todoist-lookup-input {
+	font-family: inherit;
+	font-weight: normal;
+	padding-right: 1.8em;
+}
+
+.task-todoist-lookup-input-wrap {
+	position: relative;
+}
+
+.task-todoist-lookup-input.task-todoist-lookup-locked {
+	border-color: var(--interactive-accent);
+	background-color: var(--background-modifier-hover);
+	cursor: not-allowed;
+}
+
+.task-todoist-lock-indicator {
+	position: absolute;
+	right: 0.5em;
+	top: 50%;
+	transform: translateY(-50%);
+	opacity: 0;
+	pointer-events: none;
+	font-size: 0.85em;
+	line-height: 1;
+}
+
+.task-todoist-lock-indicator.is-visible {
+	opacity: 0.8;
+}
