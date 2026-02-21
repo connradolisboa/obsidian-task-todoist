@@ -130,7 +130,7 @@ export class SyncService {
 
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById);
 			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries, this.settings.archiveMode);
-			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app);
+			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
 
 			const ancestorCount = importableWithAncestors.length - importableItems.length;
 			const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed.`;

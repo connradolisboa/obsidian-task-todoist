@@ -1,9 +1,10 @@
 import { App, TFile } from 'obsidian';
-import { getTaskStatus } from './task-frontmatter';
+import { getTaskStatus, getPropNames } from './task-frontmatter';
+import type { TaskTodoistSettings } from './settings';
 
 const LINKED_CHECKLIST_LINE_REGEX = /^(\s*[-*+]\s+)\[([ xX])\]\s+\[\[([^\]|]+)(?:\|([^\]]+))?\]\](\s*)$/;
 
-export async function syncLinkedChecklistStates(app: App): Promise<number> {
+export async function syncLinkedChecklistStates(app: App, settings: TaskTodoistSettings): Promise<number> {
 	let changedLines = 0;
 
 	for (const file of app.vault.getMarkdownFiles()) {
@@ -28,7 +29,7 @@ export async function syncLinkedChecklistStates(app: App): Promise<number> {
 				continue;
 			}
 
-			const linkedStatus = getLinkedTaskStatus(app, linkedFile);
+			const linkedStatus = getLinkedTaskStatus(app, linkedFile, settings);
 			if (!linkedStatus) {
 				continue;
 			}
@@ -52,10 +53,10 @@ export async function syncLinkedChecklistStates(app: App): Promise<number> {
 	return changedLines;
 }
 
-function getLinkedTaskStatus(app: App, file: TFile): 'open' | 'done' | null {
+function getLinkedTaskStatus(app: App, file: TFile, settings: TaskTodoistSettings): 'open' | 'done' | null {
 	const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 	if (!frontmatter) {
 		return null;
 	}
-	return getTaskStatus(frontmatter);
+	return getTaskStatus(frontmatter, settings);
 }

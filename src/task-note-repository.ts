@@ -8,10 +8,13 @@ import {
 	getDefaultTaskTag,
 	getTaskStatus,
 	getTaskTitle,
+	getPropNames,
 	setTaskStatus,
 	setTaskTitle,
 	touchModifiedDate,
 } from './task-frontmatter';
+import { buildTodoistUrl } from './task-note-factory';
+import { resolveTemplateVars } from './template-variables';
 
 interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
@@ -81,7 +84,8 @@ export class TaskNoteRepository {
 	}
 
 	async syncItems(items: TodoistItem[], maps: ProjectSectionMaps): Promise<SyncTaskResult> {
-		await this.ensureFolderExists(this.settings.tasksFolderPath);
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		await this.ensureFolderExists(resolvedFolder);
 
 		const existingByTodoistId = await this.buildTodoistIdIndexInTaskFolder();
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
@@ -121,13 +125,19 @@ export class TaskNoteRepository {
 
 	async repairMalformedSignatureFrontmatterLines(): Promise<number> {
 		let repaired = 0;
-		const folderPrefix = `${normalizePath(this.settings.tasksFolderPath)}/`;
+		const p = getPropNames(this.settings);
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		const folderPrefix = `${normalizePath(resolvedFolder)}/`;
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			if (!(file.path === normalizePath(this.settings.tasksFolderPath) || file.path.startsWith(folderPrefix))) {
+			if (!(file.path === normalizePath(resolvedFolder) || file.path.startsWith(folderPrefix))) {
 				continue;
 			}
 			const content = await this.app.vault.cachedRead(file);
-			const fixed = repairSignatureFrontmatterInContent(content);
+			const fixed = repairSignatureFrontmatterInContent(
+				content,
+				p.todoistLastImportedSignature,
+				p.todoistLastSyncedSignature,
+			);
 			if (fixed !== content) {
 				await this.app.vault.modify(file, fixed);
 				repaired += 1;
@@ -143,14 +153,17 @@ export class TaskNoteRepository {
 
 	async applyMissingRemoteTasks(missingEntries: SyncedTaskEntry[], mode: ArchiveMode): Promise<number> {
 		let changed = 0;
-		const archivePrefix = `${normalizePath(this.settings.archiveFolderPath)}/`;
+		const resolvedArchive = resolveTemplateVars(this.settings.archiveFolderPath);
+		const archivePrefix = `${normalizePath(resolvedArchive)}/`;
+		const p = getPropNames(this.settings);
+
 		for (const entry of missingEntries) {
 			const cachedFrontmatter = this.app.metadataCache.getFileCache(entry.file)?.frontmatter as Record<string, unknown> | undefined;
 			const currentSyncStatus =
-				typeof cachedFrontmatter?.todoist_sync_status === 'string'
-					? cachedFrontmatter.todoist_sync_status
+				typeof cachedFrontmatter?.[p.todoistSyncStatus] === 'string'
+					? cachedFrontmatter[p.todoistSyncStatus] as string
 					: (typeof cachedFrontmatter?.sync_status === 'string' ? cachedFrontmatter.sync_status : '');
-			const currentTaskStatus = cachedFrontmatter ? getTaskStatus(cachedFrontmatter) : 'open';
+			const currentTaskStatus = cachedFrontmatter ? getTaskStatus(cachedFrontmatter, this.settings) : 'open';
 
 			if (mode === 'none') {
 				if (currentSyncStatus === 'missing_remote') {
@@ -159,8 +172,8 @@ export class TaskNoteRepository {
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					data.todoist_sync_status = 'missing_remote';
-					data.todoist_last_imported_at = new Date().toISOString();
+					data[p.todoistSyncStatus] = 'missing_remote';
+					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
 				changed += 1;
 				continue;
@@ -179,16 +192,16 @@ export class TaskNoteRepository {
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					setTaskStatus(data, 'done');
-					data.todoist_sync_status = targetStatus;
-					data.todoist_last_imported_at = new Date().toISOString();
+					setTaskStatus(data, 'done', this.settings);
+					data[p.todoistSyncStatus] = targetStatus;
+					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
 			}
 
 			if (needsArchiveMove) {
-				await this.ensureFolderExists(this.settings.archiveFolderPath);
+				await this.ensureFolderExists(resolvedArchive);
 				const targetPath = await this.getUniqueFilePathInFolder(
-					this.settings.archiveFolderPath,
+					resolvedArchive,
 					entry.file.name,
 					entry.file.path,
 				);
@@ -204,9 +217,12 @@ export class TaskNoteRepository {
 
 	async listPendingLocalCreates(): Promise<PendingLocalCreate[]> {
 		const pending: PendingLocalCreate[] = [];
-		const folderPrefix = `${normalizePath(this.settings.tasksFolderPath)}/`;
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		const folderPrefix = `${normalizePath(resolvedFolder)}/`;
+		const p = getPropNames(this.settings);
+
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			if (!(file.path === normalizePath(this.settings.tasksFolderPath) || file.path.startsWith(folderPrefix))) {
+			if (!(file.path === normalizePath(resolvedFolder) || file.path.startsWith(folderPrefix))) {
 				continue;
 			}
 
@@ -215,30 +231,32 @@ export class TaskNoteRepository {
 				continue;
 			}
 
-			const todoistSync = frontmatter.todoist_sync;
-			const todoistId = frontmatter.todoist_id;
+			const todoistSync = frontmatter[p.todoistSync];
+			const todoistId = frontmatter[p.todoistId];
 			if (!isTruthy(todoistSync) || (typeof todoistId === 'string' && todoistId.trim())) {
 				continue;
 			}
 
-			const title = getTaskTitle(frontmatter, file.basename).trim();
+			const title = getTaskTitle(frontmatter, this.settings, file.basename).trim();
 			if (!title) {
 				continue;
 			}
 
-			const fullContent = await this.app.vault.cachedRead(file);
-			const description = fullContent.replace(/^---[\s\S]*?---\n?/, '').trim();
-			const isDone = getTaskStatus(frontmatter) === 'done';
-			const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
-			const dueDate = toOptionalString(frontmatter.todoist_due);
-			const dueString = toOptionalString(frontmatter.todoist_due_string);
+			// Description comes from the frontmatter property (body is no longer synced)
+			const description = typeof frontmatter[p.todoistDescription] === 'string'
+				? (frontmatter[p.todoistDescription] as string).trim()
+				: '';
+			const isDone = getTaskStatus(frontmatter, this.settings) === 'done';
+			const isRecurring = frontmatter[p.todoistIsRecurring] === true || frontmatter[p.todoistIsRecurring] === 'true';
+			const dueDate = toOptionalString(frontmatter[p.todoistDue]);
+			const dueString = toOptionalString(frontmatter[p.todoistDueString]);
 			const signature = buildTodoistSyncSignature({
 				title,
 				description,
 				isDone,
 				isRecurring,
-				projectId: toOptionalString(frontmatter.todoist_project_id),
-				sectionId: toOptionalString(frontmatter.todoist_section_id),
+				projectId: toOptionalString(frontmatter[p.todoistProjectId]),
+				sectionId: toOptionalString(frontmatter[p.todoistSectionId]),
 				dueDate,
 				dueString,
 			});
@@ -250,14 +268,14 @@ export class TaskNoteRepository {
 				isDone,
 				isRecurring,
 				syncSignature: signature,
-				projectName: toOptionalString(frontmatter.todoist_project_name),
-				sectionName: toOptionalString(frontmatter.todoist_section_name),
+				projectName: toOptionalString(frontmatter[p.todoistProjectName]),
+				sectionName: toOptionalString(frontmatter[p.todoistSectionName]),
 				dueDate,
 				dueString,
-				projectId: toOptionalString(frontmatter.todoist_project_id),
-				sectionId: toOptionalString(frontmatter.todoist_section_id),
-				priority: toOptionalNumber(frontmatter.todoist_priority),
-				labels: toStringArray(frontmatter.todoist_labels),
+				projectId: toOptionalString(frontmatter[p.todoistProjectId]),
+				sectionId: toOptionalString(frontmatter[p.todoistSectionId]),
+				priority: toOptionalNumber(frontmatter[p.todoistPriority]),
+				labels: toStringArray(frontmatter[p.todoistLabels]),
 			});
 		}
 
@@ -265,24 +283,30 @@ export class TaskNoteRepository {
 	}
 
 	async markLocalCreateSynced(file: TFile, todoistId: string, syncSignature: string): Promise<void> {
+		const p = getPropNames(this.settings);
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			data.todoist_id = todoistId;
-			data.todoist_sync_status = 'synced';
-			data.todoist_last_synced_signature = syncSignature;
-			if ('sync_status' in data) {
+			data[p.todoistId] = todoistId;
+			data[p.todoistSyncStatus] = 'synced';
+			data[p.todoistLastSyncedSignature] = syncSignature;
+			// Write URL now that we have the Todoist ID
+			data[p.todoistUrl] = buildTodoistUrl(todoistId, this.settings);
+			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
-			data.todoist_last_imported_at = new Date().toISOString();
+			data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
 	}
 
 	async listPendingLocalUpdates(): Promise<PendingLocalUpdate[]> {
 		const pending: PendingLocalUpdate[] = [];
-		const folderPrefix = `${normalizePath(this.settings.tasksFolderPath)}/`;
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		const folderPrefix = `${normalizePath(resolvedFolder)}/`;
+		const p = getPropNames(this.settings);
+
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			if (!(file.path === normalizePath(this.settings.tasksFolderPath) || file.path.startsWith(folderPrefix))) {
+			if (!(file.path === normalizePath(resolvedFolder) || file.path.startsWith(folderPrefix))) {
 				continue;
 			}
 
@@ -292,49 +316,52 @@ export class TaskNoteRepository {
 			}
 
 			const syncStatus =
-				typeof frontmatter.todoist_sync_status === 'string'
-					? frontmatter.todoist_sync_status
+				typeof frontmatter[p.todoistSyncStatus] === 'string'
+					? frontmatter[p.todoistSyncStatus] as string
 					: (typeof frontmatter.sync_status === 'string' ? frontmatter.sync_status : '');
 			if (syncStatus !== 'dirty_local') {
 				continue;
 			}
 
-			const todoistId = typeof frontmatter.todoist_id === 'string' ? frontmatter.todoist_id.trim() : '';
+			const todoistId = typeof frontmatter[p.todoistId] === 'string' ? (frontmatter[p.todoistId] as string).trim() : '';
 			if (!todoistId) {
 				continue;
 			}
 
-			const title = getTaskTitle(frontmatter, file.basename).trim();
+			const title = getTaskTitle(frontmatter, this.settings, file.basename).trim();
 			if (!title) {
 				continue;
 			}
 
-			const isDone = getTaskStatus(frontmatter) === 'done';
-			const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
-			const fullContent = await this.app.vault.cachedRead(file);
-			const description = fullContent.replace(/^---[\s\S]*?---\n?/, '').trim();
-			const dueDate = toOptionalString(frontmatter.todoist_due);
-			const dueString = toOptionalString(frontmatter.todoist_due_string);
+			const isDone = getTaskStatus(frontmatter, this.settings) === 'done';
+			const isRecurring = frontmatter[p.todoistIsRecurring] === true || frontmatter[p.todoistIsRecurring] === 'true';
+
+			// Description comes from the frontmatter property (body is no longer synced)
+			const description = typeof frontmatter[p.todoistDescription] === 'string'
+				? (frontmatter[p.todoistDescription] as string).trim()
+				: '';
+			const dueDate = toOptionalString(frontmatter[p.todoistDue]);
+			const dueString = toOptionalString(frontmatter[p.todoistDueString]);
 			const signature = buildTodoistSyncSignature({
 				title,
 				description,
 				isDone,
 				isRecurring,
-				projectId: toOptionalString(frontmatter.todoist_project_id),
-				sectionId: toOptionalString(frontmatter.todoist_section_id),
+				projectId: toOptionalString(frontmatter[p.todoistProjectId]),
+				sectionId: toOptionalString(frontmatter[p.todoistSectionId]),
 				dueDate,
 				dueString,
 			});
 			const lastSyncedSignature =
-				typeof frontmatter.todoist_last_synced_signature === 'string'
-					? frontmatter.todoist_last_synced_signature
+				typeof frontmatter[p.todoistLastSyncedSignature] === 'string'
+					? frontmatter[p.todoistLastSyncedSignature] as string
 					: '';
 			if (syncStatus === 'dirty_local' && lastSyncedSignature === signature) {
 				await this.app.fileManager.processFrontMatter(file, (dirtyFrontmatter) => {
 					const data = dirtyFrontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					data.todoist_sync_status = 'synced';
-					if ('sync_status' in data) {
+					data[p.todoistSyncStatus] = 'synced';
+					if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 						delete data.sync_status;
 					}
 				});
@@ -349,12 +376,12 @@ export class TaskNoteRepository {
 				isDone,
 				isRecurring,
 				syncSignature: signature,
-				projectName: toOptionalString(frontmatter.todoist_project_name),
-				sectionName: toOptionalString(frontmatter.todoist_section_name),
+				projectName: toOptionalString(frontmatter[p.todoistProjectName]),
+				sectionName: toOptionalString(frontmatter[p.todoistSectionName]),
 				dueDate,
 				dueString,
-				projectId: toOptionalString(frontmatter.todoist_project_id),
-				sectionId: toOptionalString(frontmatter.todoist_section_id),
+				projectId: toOptionalString(frontmatter[p.todoistProjectId]),
+				sectionId: toOptionalString(frontmatter[p.todoistSectionId]),
 			});
 		}
 
@@ -362,15 +389,16 @@ export class TaskNoteRepository {
 	}
 
 	async markLocalUpdateSynced(file: TFile, syncSignature: string): Promise<void> {
+		const p = getPropNames(this.settings);
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			data.todoist_sync_status = 'synced';
-			data.todoist_last_synced_signature = syncSignature;
-			if ('sync_status' in data) {
+			data[p.todoistSyncStatus] = 'synced';
+			data[p.todoistLastSyncedSignature] = syncSignature;
+			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
-			data.todoist_last_imported_at = new Date().toISOString();
+			data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
 	}
 
@@ -392,7 +420,8 @@ export class TaskNoteRepository {
 	}
 
 	private async createTaskFile(item: TodoistItem, maps: ProjectSectionMaps): Promise<UpsertResult & { file: TFile }> {
-		const filePath = await this.getUniqueTaskFilePath(item.content, item.id);
+		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+		const filePath = await this.getUniqueTaskFilePath(item.content, item.id, projectName);
 		const markdown = buildNewFileContent(item, maps.projectNameById, maps.sectionNameById, this.settings);
 		const file = await this.app.vault.create(filePath, markdown);
 		return { created: 1, updated: 0, file };
@@ -401,38 +430,40 @@ export class TaskNoteRepository {
 	private async updateTaskFile(file: TFile, item: TodoistItem, maps: ProjectSectionMaps): Promise<UpsertResult & { file: TFile }> {
 		const remoteImportSignature = buildRemoteImportSignature(item, maps);
 		const cachedFrontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const p = getPropNames(this.settings);
 		const lastImportedSignature =
-			typeof cachedFrontmatter?.todoist_last_imported_signature === 'string'
-				? cachedFrontmatter.todoist_last_imported_signature
+			typeof cachedFrontmatter?.[p.todoistLastImportedSignature] === 'string'
+				? cachedFrontmatter[p.todoistLastImportedSignature] as string
 				: '';
 		if (lastImportedSignature === remoteImportSignature) {
-			const existingContent = await this.app.vault.cachedRead(file);
-			const needsDescriptionBackfill = !hasBodyContent(existingContent) && Boolean(item.description?.trim());
-			if (!needsDescriptionBackfill) {
-				return { created: 0, updated: 0, file };
-			}
+			return { created: 0, updated: 0, file };
 		}
+
+		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			touchModifiedDate(data);
-			setTaskTitle(data, item.content);
-			setTaskStatus(data, item.checked ? 'done' : 'open');
-			data.todoist_sync = true;
-			data.todoist_id = item.id;
-			data.todoist_project_id = item.project_id;
-			data.todoist_project_name = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-			data.todoist_section_id = item.section_id ?? '';
-			data.todoist_section_name = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
-			data.todoist_priority = item.priority ?? 1;
-			data.todoist_due = item.due?.date ?? '';
-			data.todoist_due_string = item.due?.string ?? '';
-			data.todoist_is_recurring = Boolean(item.due?.is_recurring);
-			data.todoist_last_imported_signature = remoteImportSignature;
-			data.todoist_last_synced_signature = buildTodoistSyncSignature({
+			touchModifiedDate(data, this.settings);
+			setTaskTitle(data, item.content, this.settings);
+			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
+			data[p.todoistSync] = true;
+			data[p.todoistId] = item.id;
+			data[p.todoistProjectId] = item.project_id;
+			data[p.todoistProjectName] = projectName;
+			data[p.todoistSectionId] = item.section_id ?? '';
+			data[p.todoistSectionName] = sectionName;
+			data[p.todoistPriority] = item.priority ?? 1;
+			data[p.todoistDue] = item.due?.date ?? '';
+			data[p.todoistDueString] = item.due?.string ?? '';
+			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
+			data[p.todoistDescription] = item.description?.trim() ?? '';
+			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
+			data[p.todoistLastImportedSignature] = remoteImportSignature;
+			data[p.todoistLastSyncedSignature] = buildTodoistSyncSignature({
 				title: item.content,
-				description: item.description ?? '',
+				description: item.description?.trim() ?? '',
 				isDone: Boolean(item.checked),
 				isRecurring: Boolean(item.due?.is_recurring),
 				projectId: item.project_id,
@@ -440,20 +471,18 @@ export class TaskNoteRepository {
 				dueDate: item.due?.date ?? '',
 				dueString: item.due?.string ?? '',
 			});
-			data.todoist_labels = item.labels ?? [];
-			data.todoist_parent_id = item.parent_id ?? '';
-			data.todoist_sync_status = 'synced';
-			if ('sync_status' in data) {
+			data[p.todoistLabels] = item.labels ?? [];
+			data[p.todoistParentId] = item.parent_id ?? '';
+			data[p.todoistSyncStatus] = 'synced';
+			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
-			data.todoist_last_imported_at = new Date().toISOString();
+			data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
 
-		const fileContent = await this.app.vault.cachedRead(file);
-		if (!hasBodyContent(fileContent) && item.description?.trim()) {
-			const nextContent = `${fileContent.trimEnd()}\n\n${item.description.trim()}\n`;
-			await this.app.vault.modify(file, nextContent);
-		}
+		// Note: body content is intentionally NOT updated from Todoist description.
+		// The description is stored in the todoist_description frontmatter property instead.
+		// The note body is the user's personal notes area.
 
 		const renamedFile = await this.renameTaskFileToMatchTitle(file, item.content);
 
@@ -461,6 +490,7 @@ export class TaskNoteRepository {
 	}
 
 	private async applyParentLinks(todoistIdIndex: Map<string, TFile>, assignments: ParentAssignment[]): Promise<void> {
+		const p = getPropNames(this.settings);
 		for (const assignment of assignments) {
 			const childFile = todoistIdIndex.get(assignment.childTodoistId);
 			const parentFile = todoistIdIndex.get(assignment.parentTodoistId);
@@ -470,7 +500,9 @@ export class TaskNoteRepository {
 
 			const parentLink = toWikiLink(parentFile.path);
 			const existingFrontmatter = this.app.metadataCache.getFileCache(childFile)?.frontmatter as Record<string, unknown> | undefined;
-			const existingParent = typeof existingFrontmatter?.parent_task === 'string' ? existingFrontmatter.parent_task : '';
+			const existingParent = typeof existingFrontmatter?.[p.parentTask] === 'string'
+				? existingFrontmatter[p.parentTask] as string
+				: '';
 			if (existingParent === parentLink) {
 				continue;
 			}
@@ -478,13 +510,14 @@ export class TaskNoteRepository {
 			await this.app.fileManager.processFrontMatter(childFile, (frontmatter) => {
 				const data = frontmatter as Record<string, unknown>;
 				applyStandardTaskFrontmatter(data, this.settings);
-				touchModifiedDate(data);
-				data.parent_task = parentLink;
+				touchModifiedDate(data, this.settings);
+				data[p.parentTask] = parentLink;
 			});
 		}
 	}
 
 	private async applyChildMetadata(todoistIdIndex: Map<string, TFile>, assignments: ParentAssignment[]): Promise<void> {
+		const p = getPropNames(this.settings);
 		const childLinksByParentTodoistId = new Map<string, string[]>();
 		for (const assignment of assignments) {
 			const parentFile = todoistIdIndex.get(assignment.parentTodoistId);
@@ -503,9 +536,9 @@ export class TaskNoteRepository {
 			const desiredChildCount = desiredChildLinks.length;
 
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			const currentHasChildren = toOptionalBoolean(frontmatter?.todoist_has_children) ?? false;
-			const currentChildCount = toOptionalNumber(frontmatter?.todoist_child_task_count) ?? 0;
-			const currentChildLinks = toStringArray(frontmatter?.todoist_child_tasks).slice().sort((a, b) => a.localeCompare(b));
+			const currentHasChildren = toOptionalBoolean(frontmatter?.[p.todoistHasChildren]) ?? false;
+			const currentChildCount = toOptionalNumber(frontmatter?.[p.todoistChildTaskCount]) ?? 0;
+			const currentChildLinks = toStringArray(frontmatter?.[p.todoistChildTasks]).slice().sort((a, b) => a.localeCompare(b));
 
 			if (
 				currentHasChildren === desiredHasChildren
@@ -518,19 +551,20 @@ export class TaskNoteRepository {
 			await this.app.fileManager.processFrontMatter(file, (rawFrontmatter) => {
 				const data = rawFrontmatter as Record<string, unknown>;
 				applyStandardTaskFrontmatter(data, this.settings);
-				touchModifiedDate(data);
-				data.todoist_has_children = desiredHasChildren;
-				data.todoist_child_task_count = desiredChildCount;
-				data.todoist_child_tasks = desiredChildLinks;
+				touchModifiedDate(data, this.settings);
+				data[p.todoistHasChildren] = desiredHasChildren;
+				data[p.todoistChildTaskCount] = desiredChildCount;
+				data[p.todoistChildTasks] = desiredChildLinks;
 			});
 		}
 	}
 
 	private async buildTodoistIdIndexInTaskFolder(): Promise<Map<string, TFile>> {
-		const folderPrefix = `${normalizePath(this.settings.tasksFolderPath)}/`;
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		const folderPrefix = `${normalizePath(resolvedFolder)}/`;
 		const index = new Map<string, TFile>();
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			if (!(file.path === normalizePath(this.settings.tasksFolderPath) || file.path.startsWith(folderPrefix))) {
+			if (!(file.path === normalizePath(resolvedFolder) || file.path.startsWith(folderPrefix))) {
 				continue;
 			}
 
@@ -543,8 +577,9 @@ export class TaskNoteRepository {
 	}
 
 	private async getTodoistId(file: TFile): Promise<string | null> {
+		const p = getPropNames(this.settings);
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const fromCache = frontmatter?.todoist_id;
+		const fromCache = frontmatter?.[p.todoistId];
 		if (typeof fromCache === 'string' && fromCache.trim()) {
 			return fromCache;
 		}
@@ -553,8 +588,10 @@ export class TaskNoteRepository {
 		}
 
 		const content = await this.app.vault.cachedRead(file);
-		const match = content.match(/^---[\s\S]*?\btodoist_id:\s*["']?([^\n"']+)["']?\s*$/m);
-		return match?.[1]?.trim() ?? null;
+		// Fall back to regex scan using the configured property name
+		const escapedKey = p.todoistId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const pattern = new RegExp(`^---[\\s\\S]*?\\b${escapedKey}:\\s*["']?([^\\n"']+)["']?\\s*$`, 'm');
+		return content.match(pattern)?.[1]?.trim() ?? null;
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -573,8 +610,19 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string): Promise<string> {
-		const folder = normalizePath(this.settings.tasksFolderPath);
+	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string, projectName?: string): Promise<string> {
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+		let folder = normalizePath(resolvedFolder);
+
+		if (this.settings.useProjectSubfolders && projectName?.trim()) {
+			const sanitized = sanitizeFileName(projectName.trim());
+			if (sanitized) {
+				const subFolder = normalizePath(`${folder}/${sanitized}`);
+				await this.ensureFolderExists(subFolder);
+				folder = subFolder;
+			}
+		}
+
 		const base = sanitizeFileName(taskTitle) || `Task-${todoistId}`;
 		const basePath = normalizePath(`${folder}/${base}.md`);
 		if (!this.app.vault.getAbstractFileByPath(basePath)) {
@@ -614,34 +662,41 @@ function buildNewFileContent(
 ): string {
 	const now = new Date();
 	const defaultTag = getDefaultTaskTag(settings) ?? 'tasks';
+	const p = getPropNames(settings);
+	const projectName = projectNameById.get(item.project_id) ?? 'Unknown';
+	const sectionName = item.section_id ? (sectionNameById.get(item.section_id) ?? '') : '';
+	const description = item.description?.trim() ?? '';
+	const todoistUrl = buildTodoistUrl(item.id, settings);
 	const yaml = [
 		'---',
-		`task_status: ${item.checked ? 'done' : 'open'}`,
-		`task_done: ${item.checked ? 'true' : 'false'}`,
-		`created: "${formatCreatedDate(now)}"`,
-		`modified: "${formatModifiedDate(now)}"`,
-		'tags:',
+		`${p.taskStatus}: ${item.checked ? 'done' : 'open'}`,
+		`${p.taskDone}: ${item.checked ? 'true' : 'false'}`,
+		`${p.created}: "${formatCreatedDate(now)}"`,
+		`${p.modified}: "${formatModifiedDate(now)}"`,
+		`${p.tags}:`,
 		`  - ${defaultTag}`,
-		'links: []',
-		`task_title: ${toQuotedYaml(item.content)}`,
-		'todoist_sync: true',
-		'todoist_sync_status: "synced"',
-		`todoist_id: "${escapeDoubleQuotes(item.id)}"`,
-		`todoist_project_id: "${escapeDoubleQuotes(item.project_id)}"`,
-		`todoist_project_name: ${toQuotedYaml(projectNameById.get(item.project_id) ?? 'Unknown')}`,
-		`todoist_section_id: "${escapeDoubleQuotes(item.section_id ?? '')}"`,
-		`todoist_section_name: ${toQuotedYaml(item.section_id ? (sectionNameById.get(item.section_id) ?? '') : '')}`,
-		`todoist_priority: ${item.priority ?? 1}`,
-		`todoist_due: "${escapeDoubleQuotes(item.due?.date ?? '')}"`,
-		`todoist_due_string: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
-		`todoist_is_recurring: ${item.due?.is_recurring ? 'true' : 'false'}`,
-		`todoist_last_imported_signature: "${escapeDoubleQuotes(buildRemoteImportSignature(item, {
+		`${p.links}: []`,
+		`${p.taskTitle}: ${toQuotedYaml(item.content)}`,
+		`${p.todoistSync}: true`,
+		`${p.todoistSyncStatus}: "synced"`,
+		`${p.todoistId}: "${escapeDoubleQuotes(item.id)}"`,
+		`${p.todoistProjectId}: "${escapeDoubleQuotes(item.project_id)}"`,
+		`${p.todoistProjectName}: ${toQuotedYaml(projectName)}`,
+		`${p.todoistSectionId}: "${escapeDoubleQuotes(item.section_id ?? '')}"`,
+		`${p.todoistSectionName}: ${toQuotedYaml(sectionName)}`,
+		`${p.todoistPriority}: ${item.priority ?? 1}`,
+		`${p.todoistDue}: "${escapeDoubleQuotes(item.due?.date ?? '')}"`,
+		`${p.todoistDueString}: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
+		`${p.todoistIsRecurring}: ${item.due?.is_recurring ? 'true' : 'false'}`,
+		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
+		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
+		`${p.todoistLastImportedSignature}: "${escapeDoubleQuotes(buildRemoteImportSignature(item, {
 			projectNameById,
 			sectionNameById,
 		}))}"`,
-		`todoist_last_synced_signature: "${escapeDoubleQuotes(buildTodoistSyncSignature({
+		`${p.todoistLastSyncedSignature}: "${escapeDoubleQuotes(buildTodoistSyncSignature({
 			title: item.content,
-			description: item.description ?? '',
+			description,
 			isDone: Boolean(item.checked),
 			isRecurring: Boolean(item.due?.is_recurring),
 			projectId: item.project_id,
@@ -649,15 +704,13 @@ function buildNewFileContent(
 			dueDate: item.due?.date ?? '',
 			dueString: item.due?.string ?? '',
 		}))}"`,
-		`todoist_labels: [${(item.labels ?? []).map((label) => toQuotedYamlInline(label)).join(', ')}]`,
-		`todoist_parent_id: "${escapeDoubleQuotes(item.parent_id ?? '')}"`,
-		'todoist_has_children: false',
-		'todoist_child_task_count: 0',
-		'todoist_child_tasks: []',
-		`todoist_last_imported_at: "${new Date().toISOString()}"`,
+		`${p.todoistLabels}: [${(item.labels ?? []).map((label) => toQuotedYamlInline(label)).join(', ')}]`,
+		`${p.todoistParentId}: "${escapeDoubleQuotes(item.parent_id ?? '')}"`,
+		`${p.todoistHasChildren}: false`,
+		`${p.todoistChildTaskCount}: 0`,
+		`${p.todoistChildTasks}: []`,
+		`${p.todoistLastImportedAt}: "${new Date().toISOString()}"`,
 		'---',
-		'',
-		item.description?.trim() ?? '',
 		'',
 	];
 	return yaml.join('\n');
@@ -673,11 +726,6 @@ function getFolderPath(path: string): string {
 		return '';
 	}
 	return path.slice(0, slashIndex);
-}
-
-function hasBodyContent(markdown: string): boolean {
-	const contentWithoutFrontmatter = markdown.replace(/^---[\s\S]*?---\n?/, '').trim();
-	return contentWithoutFrontmatter.length > 0;
 }
 
 function sanitizeFileName(value: string): string {
@@ -790,7 +838,11 @@ function simpleStableHash(value: string): string {
 	return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-function repairSignatureFrontmatterInContent(content: string): string {
+function repairSignatureFrontmatterInContent(
+	content: string,
+	importedSigKey: string,
+	syncedSigKey: string,
+): string {
 	const frontmatterMatch = content.match(/^---\n[\s\S]*?\n---/);
 	if (!frontmatterMatch) {
 		return content;
@@ -798,18 +850,22 @@ function repairSignatureFrontmatterInContent(content: string): string {
 	const originalFrontmatter = frontmatterMatch[0];
 	let changed = false;
 	const lines = originalFrontmatter.split('\n');
+	const escapedImported = importedSigKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const escapedSynced = syncedSigKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const importedRe = new RegExp(`^\\s*${escapedImported}:`);
+	const syncedRe = new RegExp(`^\\s*${escapedSynced}:`);
 	const fixedLines = lines.map((line) => {
-		if (/^\s*todoist_last_imported_signature:/.test(line)) {
-			if (!isValidSignatureFrontmatterLine(line, 'todoist_last_imported_signature')) {
+		if (importedRe.test(line)) {
+			if (!isValidSignatureFrontmatterLine(line, importedSigKey)) {
 				changed = true;
-				return 'todoist_last_imported_signature: ""';
+				return `${importedSigKey}: ""`;
 			}
 			return line;
 		}
-		if (/^\s*todoist_last_synced_signature:/.test(line)) {
-			if (!isValidSignatureFrontmatterLine(line, 'todoist_last_synced_signature')) {
+		if (syncedRe.test(line)) {
+			if (!isValidSignatureFrontmatterLine(line, syncedSigKey)) {
 				changed = true;
-				return 'todoist_last_synced_signature: ""';
+				return `${syncedSigKey}: ""`;
 			}
 			return line;
 		}

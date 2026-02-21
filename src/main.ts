@@ -2,6 +2,7 @@ import { Editor, MarkdownView, Notice, Plugin, TAbstractFile, TFile, normalizePa
 import {
 	DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	DEFAULT_SETTINGS,
+	DEFAULT_PROP_NAMES,
 	type TaskTodoistSettings,
 } from './settings';
 import { TaskTodoistSettingTab } from './settings-tab';
@@ -12,7 +13,8 @@ import { createLocalTaskNote, type LocalTaskNoteInput } from './task-note-factor
 import { registerInlineTaskConverter } from './inline-task-converter';
 import { createTaskConvertOverlayExtension } from './editor-task-convert-overlay';
 import { formatDueForDisplay, parseInlineTaskDirectives } from './task-directives';
-import { applyStandardTaskFrontmatter, setTaskStatus, touchModifiedDate } from './task-frontmatter';
+import { applyStandardTaskFrontmatter, getPropNames, setTaskStatus, touchModifiedDate } from './task-frontmatter';
+import { resolveTemplateVars } from './template-variables';
 
 export default class TaskTodoistPlugin extends Plugin {
 	settings: TaskTodoistSettings;
@@ -45,7 +47,13 @@ export default class TaskTodoistPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const loaded = await this.loadData() as Partial<TaskTodoistSettings> | null;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
+		const raw = loaded ?? {};
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...raw,
+			// Deep merge propNames so partial saved configs inherit defaults for new keys
+			propNames: { ...DEFAULT_PROP_NAMES, ...(raw.propNames ?? {}) },
+		};
 	}
 
 	async saveSettings(): Promise<void> {
@@ -234,16 +242,18 @@ export default class TaskTodoistPlugin extends Plugin {
 			return;
 		}
 
+		const p = getPropNames(this.settings);
 		await this.app.fileManager.processFrontMatter(taskFile, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			touchModifiedDate(data);
-			setTaskStatus(data, isDone ? 'done' : 'open');
-			data.local_updated_at = new Date().toISOString();
-			const todoistId = typeof data.todoist_id === 'string' ? data.todoist_id : '';
+			touchModifiedDate(data, this.settings);
+			setTaskStatus(data, isDone ? 'done' : 'open', this.settings);
+			data[p.localUpdatedAt] = new Date().toISOString();
+			const todoistId = typeof data[p.todoistId] === 'string' ? (data[p.todoistId] as string) : '';
 			if (todoistId.trim()) {
-				data.todoist_sync_status = 'dirty_local';
-				if ('sync_status' in data) {
+				data[p.todoistSyncStatus] = 'dirty_local';
+				// Clean up legacy key if present
+				if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 					delete data.sync_status;
 				}
 			}
@@ -256,11 +266,12 @@ export default class TaskTodoistPlugin extends Plugin {
 		if (taskFile) {
 			const frontmatter = this.app.metadataCache.getFileCache(taskFile)?.frontmatter as Record<string, unknown> | undefined;
 			if (frontmatter) {
-				const projectName = typeof frontmatter.todoist_project_name === 'string' ? frontmatter.todoist_project_name.trim() : '';
-				const sectionName = typeof frontmatter.todoist_section_name === 'string' ? frontmatter.todoist_section_name.trim() : '';
-				const dueString = typeof frontmatter.todoist_due_string === 'string' ? frontmatter.todoist_due_string.trim() : '';
-				const dueDate = typeof frontmatter.todoist_due === 'string' ? frontmatter.todoist_due.trim() : '';
-				const isRecurring = frontmatter.todoist_is_recurring === true || frontmatter.todoist_is_recurring === 'true';
+				const p = getPropNames(this.settings);
+				const projectName = typeof frontmatter[p.todoistProjectName] === 'string' ? (frontmatter[p.todoistProjectName] as string).trim() : '';
+				const sectionName = typeof frontmatter[p.todoistSectionName] === 'string' ? (frontmatter[p.todoistSectionName] as string).trim() : '';
+				const dueString = typeof frontmatter[p.todoistDueString] === 'string' ? (frontmatter[p.todoistDueString] as string).trim() : '';
+				const dueDate = typeof frontmatter[p.todoistDue] === 'string' ? (frontmatter[p.todoistDue] as string).trim() : '';
+				const isRecurring = frontmatter[p.todoistIsRecurring] === true || frontmatter[p.todoistIsRecurring] === 'true';
 				const summary = buildMetaSummary(projectName, sectionName, dueDate, dueString, isRecurring);
 				if (summary) {
 					this.recentTaskMetaByLink.delete(linkTarget);
@@ -425,15 +436,16 @@ export default class TaskTodoistPlugin extends Plugin {
 			return;
 		}
 
-		const todoistSync = frontmatter.todoist_sync;
-		const todoistId = typeof frontmatter.todoist_id === 'string' ? frontmatter.todoist_id.trim() : '';
+		const p = getPropNames(this.settings);
+		const todoistSync = frontmatter[p.todoistSync];
+		const todoistId = typeof frontmatter[p.todoistId] === 'string' ? (frontmatter[p.todoistId] as string).trim() : '';
 		if (!(todoistSync === true || todoistSync === 'true') || !todoistId) {
 			return;
 		}
 
 		const currentStatus =
-			typeof frontmatter.todoist_sync_status === 'string'
-				? frontmatter.todoist_sync_status
+			typeof frontmatter[p.todoistSyncStatus] === 'string'
+				? frontmatter[p.todoistSyncStatus] as string
 				: (typeof frontmatter.sync_status === 'string' ? frontmatter.sync_status : '');
 		if (currentStatus === 'dirty_local' || currentStatus === 'queued_local_create') {
 			return;
@@ -442,17 +454,17 @@ export default class TaskTodoistPlugin extends Plugin {
 		await this.app.fileManager.processFrontMatter(file, (frontmatterToMutate) => {
 			const data = frontmatterToMutate as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			touchModifiedDate(data);
-			data.todoist_sync_status = 'dirty_local';
-			data.local_updated_at = new Date().toISOString();
-			if ('sync_status' in data) {
+			touchModifiedDate(data, this.settings);
+			data[p.todoistSyncStatus] = 'dirty_local';
+			data[p.localUpdatedAt] = new Date().toISOString();
+			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
 		});
 	}
 
 	private isTaskFilePath(path: string): boolean {
-		const taskFolder = normalizePath(this.settings.tasksFolderPath);
+		const taskFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
 		const taskPrefix = `${taskFolder}/`;
 		return path === taskFolder || path.startsWith(taskPrefix);
 	}

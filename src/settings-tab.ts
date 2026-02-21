@@ -1,6 +1,7 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type TaskTodoistPlugin from './main';
-import type { ArchiveMode, ImportProjectScope } from './settings';
+import { DEFAULT_PROP_NAMES } from './settings';
+import type { ArchiveMode, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
 export class TaskTodoistSettingTab extends PluginSettingTab {
 	plugin: TaskTodoistPlugin;
@@ -18,7 +19,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Task folder path')
-			.setDesc('Folder where synced task notes are created.')
+			.setDesc('Folder where synced task notes are created. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}, {{YYYY-MM}}, {{YYYY-MM-DD}}.')
 			.addText((text) => {
 				text
 					.setPlaceholder('Tasks')
@@ -32,10 +33,10 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Default task tag')
-			.setDesc('Default tag added to task notes for easy bases filtering.')
+			.setDesc('Default tag added to task notes. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}.')
 			.addText((text) => {
 				text
-					.setPlaceholder('Tasks')
+					.setPlaceholder('tasks')
 					.setValue(this.plugin.settings.defaultTaskTag)
 					.onChange(async (value) => {
 						this.plugin.settings.defaultTaskTag = value.trim() || 'tasks';
@@ -50,6 +51,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.autoRenameTaskFiles).onChange(async (value) => {
 					this.plugin.settings.autoRenameTaskFiles = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Use project subfolders')
+			.setDesc('Organize task notes into subfolders named after their Todoist project (e.g. Tasks/Business/Task.md).')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.useProjectSubfolders).onChange(async (value) => {
+					this.plugin.settings.useProjectSubfolders = value;
 					await this.plugin.saveSettings();
 				});
 			});
@@ -71,7 +82,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Archive folder path')
-			.setDesc('Used when archive mode is set to move notes to archive folder.')
+			.setDesc('Used when archive mode is set to move notes to archive folder. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}.')
 			.addText((text) => {
 				text
 					.setPlaceholder('Tasks/_archive')
@@ -196,6 +207,22 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			.setName('Last connection check')
 			.setDesc(this.plugin.getLastConnectionCheckMessage());
 
+		new Setting(containerEl).setName('Todoist link style').setHeading();
+
+		new Setting(containerEl)
+			.setName('Link format')
+			.setDesc('Format used for the todoist_url property on task notes. App URI opens the Todoist app directly.')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('web', 'Web URL (https://app.todoist.com/...)')
+					.addOption('app', 'App URI (todoist://task?id=...)')
+					.setValue(this.plugin.settings.todoistLinkStyle)
+					.onChange(async (value) => {
+						this.plugin.settings.todoistLinkStyle = value as TodoistLinkStyle;
+						await this.plugin.saveSettings();
+					});
+			});
+
 		new Setting(containerEl).setName('Todoist sync').setHeading();
 
 		new Setting(containerEl)
@@ -261,6 +288,89 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				button.setButtonText('Create task').onClick(() => {
 					this.plugin.openCreateTaskModal();
 				});
+			});
+
+		// Property names section
+		new Setting(containerEl).setName('Property names').setHeading();
+
+		const propNamesDesc = containerEl.createEl('p', {
+			text: 'Customize the frontmatter property names used in task notes. Changing these will only affect new writes — existing notes keep their current keys until the next sync.',
+			cls: 'setting-item-description',
+		});
+		propNamesDesc.style.marginBottom = '0.5em';
+
+		new Setting(containerEl).setName('Core task properties').setHeading();
+
+		this.addPropNameSetting(containerEl, 'Task title', 'Property storing the task title.', 'taskTitle');
+		this.addPropNameSetting(containerEl, 'Task status', 'Property storing open/done status string.', 'taskStatus');
+		this.addPropNameSetting(containerEl, 'Task done (boolean)', 'Boolean property for done state (Bases compatibility).', 'taskDone');
+		this.addPropNameSetting(containerEl, 'Created date', 'Property storing the note creation date.', 'created');
+		this.addPropNameSetting(containerEl, 'Modified date', 'Property storing the last modified timestamp.', 'modified');
+		this.addPropNameSetting(containerEl, 'Tags', 'Property storing note tags.', 'tags');
+		this.addPropNameSetting(containerEl, 'Links', 'Property storing related links.', 'links');
+		this.addPropNameSetting(containerEl, 'Parent task', 'Property storing the wiki-link to a parent task.', 'parentTask');
+		this.addPropNameSetting(containerEl, 'Local updated at', 'Property storing when local changes were last made.', 'localUpdatedAt');
+
+		new Setting(containerEl).setName('Todoist sync properties').setHeading();
+
+		this.addPropNameSetting(containerEl, 'Todoist sync', 'Whether this note is synced with Todoist.', 'todoistSync');
+		this.addPropNameSetting(containerEl, 'Todoist sync status', 'Internal sync state (synced, dirty_local, etc.).', 'todoistSyncStatus');
+		this.addPropNameSetting(containerEl, 'Todoist ID', 'The remote Todoist task ID.', 'todoistId');
+		this.addPropNameSetting(containerEl, 'Todoist project ID', 'The remote Todoist project ID.', 'todoistProjectId');
+		this.addPropNameSetting(containerEl, 'Todoist project name', 'Human-readable Todoist project name.', 'todoistProjectName');
+		this.addPropNameSetting(containerEl, 'Todoist section ID', 'The remote Todoist section ID.', 'todoistSectionId');
+		this.addPropNameSetting(containerEl, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
+		this.addPropNameSetting(containerEl, 'Todoist priority', 'Task priority (1–4).', 'todoistPriority');
+		this.addPropNameSetting(containerEl, 'Todoist due date', 'ISO due date from Todoist.', 'todoistDue');
+		this.addPropNameSetting(containerEl, 'Todoist due string', 'Natural language recurrence string from Todoist.', 'todoistDueString');
+		this.addPropNameSetting(containerEl, 'Todoist is recurring', 'Whether the task is a recurring task.', 'todoistIsRecurring');
+		this.addPropNameSetting(containerEl, 'Todoist labels', 'Array of labels applied in Todoist.', 'todoistLabels');
+		this.addPropNameSetting(containerEl, 'Todoist parent ID', 'The Todoist ID of the parent task.', 'todoistParentId');
+		this.addPropNameSetting(containerEl, 'Todoist has children', 'Whether this task has child tasks.', 'todoistHasChildren');
+		this.addPropNameSetting(containerEl, 'Todoist child task count', 'Number of child tasks.', 'todoistChildTaskCount');
+		this.addPropNameSetting(containerEl, 'Todoist child tasks', 'Wiki-links to child task notes.', 'todoistChildTasks');
+		this.addPropNameSetting(containerEl, 'Todoist last imported signature', 'Internal hash for remote change detection.', 'todoistLastImportedSignature');
+		this.addPropNameSetting(containerEl, 'Todoist last synced signature', 'Internal hash for local change detection.', 'todoistLastSyncedSignature');
+		this.addPropNameSetting(containerEl, 'Todoist last imported at', 'Timestamp of last sync from Todoist.', 'todoistLastImportedAt');
+
+		new Setting(containerEl).setName('New properties').setHeading();
+
+		this.addPropNameSetting(containerEl, 'Todoist description', 'Stores the Todoist task description. The note body is your personal notes and is not synced.', 'todoistDescription');
+		this.addPropNameSetting(containerEl, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting above).', 'todoistUrl');
+
+		new Setting(containerEl)
+			.setName('Reset property names to defaults')
+			.setDesc('Restore all property names to their default values.')
+			.addButton((button) => {
+				button.setButtonText('Reset to defaults').setWarning().onClick(async () => {
+					this.plugin.settings.propNames = { ...DEFAULT_PROP_NAMES };
+					await this.plugin.saveSettings();
+					this.display();
+					new Notice('Property names reset to defaults.', 3000);
+				});
+			});
+	}
+
+	private addPropNameSetting(
+		containerEl: HTMLElement,
+		name: string,
+		desc: string,
+		key: keyof PropNames,
+	): void {
+		const defaultValue = DEFAULT_PROP_NAMES[key];
+		new Setting(containerEl)
+			.setName(name)
+			.setDesc(`${desc} Default: "${defaultValue}"`)
+			.addText((text) => {
+				text
+					.setPlaceholder(defaultValue)
+					.setValue(this.plugin.settings.propNames[key])
+					.onChange(async (value) => {
+						const normalized = value.trim() || defaultValue;
+						this.plugin.settings.propNames[key] = normalized;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 28;
 			});
 	}
 }

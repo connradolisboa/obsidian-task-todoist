@@ -1,37 +1,46 @@
-import type { TaskTodoistSettings } from './settings';
+import type { PropNames, TaskTodoistSettings } from './settings';
+import { resolveTemplateVars } from './template-variables';
+
+export function getPropNames(settings: TaskTodoistSettings): PropNames {
+	return settings.propNames;
+}
 
 export function applyStandardTaskFrontmatter(
 	frontmatter: Record<string, unknown>,
 	settings: TaskTodoistSettings,
 ): void {
-	if (typeof frontmatter.created !== 'string' || !frontmatter.created.trim()) {
-		frontmatter.created = formatCreatedDate(new Date());
+	const p = getPropNames(settings);
+
+	if (typeof frontmatter[p.created] !== 'string' || !(frontmatter[p.created] as string).trim()) {
+		frontmatter[p.created] = formatCreatedDate(new Date());
 	}
-	if (typeof frontmatter.modified !== 'string' || !frontmatter.modified.trim()) {
-		frontmatter.modified = formatModifiedDate(new Date());
+	if (typeof frontmatter[p.modified] !== 'string' || !(frontmatter[p.modified] as string).trim()) {
+		frontmatter[p.modified] = formatModifiedDate(new Date());
 	}
 
-	const defaultTag = normalizeTag(settings.defaultTaskTag);
-	const existingTags = normalizeTags(frontmatter.tags);
+	const defaultTag = normalizeTag(resolveTemplateVars(settings.defaultTaskTag));
+	const existingTags = normalizeTags(frontmatter[p.tags]);
 	if (defaultTag && !existingTags.includes(defaultTag)) {
 		existingTags.unshift(defaultTag);
 	}
-	frontmatter.tags = existingTags;
+	frontmatter[p.tags] = existingTags;
 
-	if (!Array.isArray(frontmatter.links)) {
-		frontmatter.links = [];
+	if (!Array.isArray(frontmatter[p.links])) {
+		frontmatter[p.links] = [];
 	}
 }
 
-export function touchModifiedDate(frontmatter: Record<string, unknown>): void {
-	frontmatter.modified = formatModifiedDate(new Date());
+export function touchModifiedDate(frontmatter: Record<string, unknown>, settings: TaskTodoistSettings): void {
+	frontmatter[getPropNames(settings).modified] = formatModifiedDate(new Date());
 }
 
-export function getTaskTitle(frontmatter: Record<string, unknown>, fallback = ''): string {
-	const taskTitle = typeof frontmatter.task_title === 'string' ? frontmatter.task_title.trim() : '';
+export function getTaskTitle(frontmatter: Record<string, unknown>, settings: TaskTodoistSettings, fallback = ''): string {
+	const p = getPropNames(settings);
+	const taskTitle = typeof frontmatter[p.taskTitle] === 'string' ? (frontmatter[p.taskTitle] as string).trim() : '';
 	if (taskTitle) {
 		return taskTitle;
 	}
+	// Legacy fallback
 	const legacyTitle = typeof frontmatter.title === 'string' ? frontmatter.title.trim() : '';
 	if (legacyTitle) {
 		return legacyTitle;
@@ -39,20 +48,25 @@ export function getTaskTitle(frontmatter: Record<string, unknown>, fallback = ''
 	return fallback;
 }
 
-export function getTaskStatus(frontmatter: Record<string, unknown>): 'open' | 'done' {
-	if (frontmatter.task_done === true || frontmatter.task_done === 'true') {
+export function getTaskStatus(frontmatter: Record<string, unknown>, settings: TaskTodoistSettings): 'open' | 'done' {
+	const p = getPropNames(settings);
+	const taskDone = frontmatter[p.taskDone];
+	if (taskDone === true || taskDone === 'true') {
 		return 'done';
 	}
-	if (frontmatter.task_done === false || frontmatter.task_done === 'false') {
+	if (taskDone === false || taskDone === 'false') {
 		return 'open';
 	}
-	const taskStatus = typeof frontmatter.task_status === 'string' ? frontmatter.task_status.trim().toLowerCase() : '';
+	const taskStatus = typeof frontmatter[p.taskStatus] === 'string'
+		? (frontmatter[p.taskStatus] as string).trim().toLowerCase()
+		: '';
 	if (taskStatus === 'done') {
 		return 'done';
 	}
 	if (taskStatus === 'open') {
 		return 'open';
 	}
+	// Legacy fallbacks
 	if (frontmatter.done === true || frontmatter.done === 'true') {
 		return 'done';
 	}
@@ -63,26 +77,34 @@ export function getTaskStatus(frontmatter: Record<string, unknown>): 'open' | 'd
 	return 'open';
 }
 
-export function setTaskTitle(frontmatter: Record<string, unknown>, title: string): void {
-	frontmatter.task_title = title;
-	if ('title' in frontmatter) {
+export function setTaskTitle(frontmatter: Record<string, unknown>, title: string, settings: TaskTodoistSettings): void {
+	const p = getPropNames(settings);
+	frontmatter[p.taskTitle] = title;
+	// Remove legacy keys if present
+	if (p.taskTitle !== 'title' && 'title' in frontmatter) {
 		delete frontmatter.title;
 	}
 }
 
-export function setTaskStatus(frontmatter: Record<string, unknown>, status: 'open' | 'done'): void {
-	frontmatter.task_status = status;
-	frontmatter.task_done = status === 'done';
-	if ('status' in frontmatter) {
+export function setTaskStatus(
+	frontmatter: Record<string, unknown>,
+	status: 'open' | 'done',
+	settings: TaskTodoistSettings,
+): void {
+	const p = getPropNames(settings);
+	frontmatter[p.taskStatus] = status;
+	frontmatter[p.taskDone] = status === 'done';
+	// Remove legacy keys if present
+	if (p.taskStatus !== 'status' && 'status' in frontmatter) {
 		delete frontmatter.status;
 	}
-	if ('done' in frontmatter) {
+	if (p.taskDone !== 'done' && 'done' in frontmatter) {
 		delete frontmatter.done;
 	}
 }
 
 export function getDefaultTaskTag(settings: TaskTodoistSettings): string | null {
-	return normalizeTag(settings.defaultTaskTag);
+	return normalizeTag(resolveTemplateVars(settings.defaultTaskTag));
 }
 
 export function formatCreatedDate(date: Date): string {

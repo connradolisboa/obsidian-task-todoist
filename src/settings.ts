@@ -2,6 +2,76 @@ export const DEFAULT_TODOIST_TOKEN_SECRET_NAME = 'todoist-api';
 
 export type ArchiveMode = 'none' | 'move-to-archive-folder' | 'mark-local-done';
 export type ImportProjectScope = 'all-projects' | 'allow-list-by-name';
+export type TodoistLinkStyle = 'app' | 'web';
+
+export interface PropNames {
+	// Core task properties
+	taskTitle: string;
+	taskStatus: string;
+	taskDone: string;
+	created: string;
+	modified: string;
+	tags: string;
+	links: string;
+	parentTask: string;
+	localUpdatedAt: string;
+	// Todoist sync properties
+	todoistSync: string;
+	todoistSyncStatus: string;
+	todoistId: string;
+	todoistProjectId: string;
+	todoistProjectName: string;
+	todoistSectionId: string;
+	todoistSectionName: string;
+	todoistPriority: string;
+	todoistDue: string;
+	todoistDueString: string;
+	todoistIsRecurring: string;
+	todoistLabels: string;
+	todoistParentId: string;
+	todoistHasChildren: string;
+	todoistChildTaskCount: string;
+	todoistChildTasks: string;
+	todoistLastImportedSignature: string;
+	todoistLastSyncedSignature: string;
+	todoistLastImportedAt: string;
+	// New properties
+	todoistDescription: string;
+	todoistUrl: string;
+}
+
+export const DEFAULT_PROP_NAMES: PropNames = {
+	taskTitle: 'task_title',
+	taskStatus: 'task_status',
+	taskDone: 'task_done',
+	created: 'created',
+	modified: 'modified',
+	tags: 'tags',
+	links: 'links',
+	parentTask: 'parent_task',
+	localUpdatedAt: 'local_updated_at',
+	todoistSync: 'todoist_sync',
+	todoistSyncStatus: 'todoist_sync_status',
+	todoistId: 'todoist_id',
+	todoistProjectId: 'todoist_project_id',
+	todoistProjectName: 'todoist_project_name',
+	todoistSectionId: 'todoist_section_id',
+	todoistSectionName: 'todoist_section_name',
+	todoistPriority: 'todoist_priority',
+	todoistDue: 'todoist_due',
+	todoistDueString: 'todoist_due_string',
+	todoistIsRecurring: 'todoist_is_recurring',
+	todoistLabels: 'todoist_labels',
+	todoistParentId: 'todoist_parent_id',
+	todoistHasChildren: 'todoist_has_children',
+	todoistChildTaskCount: 'todoist_child_task_count',
+	todoistChildTasks: 'todoist_child_tasks',
+	todoistLastImportedSignature: 'todoist_last_imported_signature',
+	todoistLastSyncedSignature: 'todoist_last_synced_signature',
+	todoistLastImportedAt: 'todoist_last_imported_at',
+	todoistDescription: 'todoist_description',
+	todoistUrl: 'todoist_url',
+};
 
 export interface TaskTodoistSettings {
 	tasksFolderPath: string;
@@ -18,6 +88,10 @@ export interface TaskTodoistSettings {
 	autoImportRequiredLabel: string;
 	autoImportAssignedToMeOnly: boolean;
 	todoistTokenSecretName: string;
+	// New settings
+	propNames: PropNames;
+	useProjectSubfolders: boolean;
+	todoistLinkStyle: TodoistLinkStyle;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -35,4 +109,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	autoImportRequiredLabel: 'obsidian',
 	autoImportAssignedToMeOnly: true,
 	todoistTokenSecretName: DEFAULT_TODOIST_TOKEN_SECRET_NAME,
+	propNames: { ...DEFAULT_PROP_NAMES },
+	useProjectSubfolders: false,
+	todoistLinkStyle: 'web',
 };

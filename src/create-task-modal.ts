@@ -473,14 +473,15 @@ export class CreateTaskModal extends Modal {
 
 	private getParentTaskDisplayName(file: TFile): string {
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		return getTaskTitle(frontmatter ?? {}, file.basename);
+		return getTaskTitle(frontmatter ?? {}, this.plugin.settings, file.basename);
 	}
 
 	private getParentTaskInfo(file: TFile): { display: string; projectId: string; projectName: string } {
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const display = getTaskTitle(frontmatter ?? {}, file.basename);
-		const projectId = typeof frontmatter?.todoist_project_id === 'string' ? frontmatter.todoist_project_id.trim() : '';
-		const projectName = typeof frontmatter?.todoist_project_name === 'string' ? frontmatter.todoist_project_name.trim() : '';
+		const display = getTaskTitle(frontmatter ?? {}, this.plugin.settings, file.basename);
+		const p = this.plugin.settings.propNames;
+		const projectId = typeof frontmatter?.[p.todoistProjectId] === 'string' ? (frontmatter[p.todoistProjectId] as string).trim() : '';
+		const projectName = typeof frontmatter?.[p.todoistProjectName] === 'string' ? (frontmatter[p.todoistProjectName] as string).trim() : '';
 		return { display, projectId, projectName };
 	}
 
