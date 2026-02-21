@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
-import { formatCreatedDate, formatModifiedDate, getDefaultTaskTag, getPropNames } from './task-frontmatter';
-import { resolveTemplateVars } from './template-variables';
+import { formatCreatedDate, formatModifiedDate, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
+import { resolveTemplateVars, TaskTemplateContext } from './template-variables';
 
 export interface LocalTaskNoteInput {
 	title: string;
@@ -15,6 +15,8 @@ export interface LocalTaskNoteInput {
 	todoistSectionName?: string;
 	todoistDueDate?: string;
 	todoistDueString?: string;
+	todoistDeadlineDate?: string;
+	todoistPriority?: number;
 }
 
 export async function createLocalTaskNote(
@@ -23,7 +25,7 @@ export async function createLocalTaskNote(
 	input: LocalTaskNoteInput,
 ): Promise<TFile> {
 	const resolvedFolder = resolveTemplateVars(settings.tasksFolderPath);
-	const folderPath = buildTaskFolderPath(resolvedFolder, settings, input.todoistProjectName);
+	const folderPath = buildTaskFolderPath(resolvedFolder, settings, input.todoistProjectName, input.todoistSectionName);
 	await ensureFolderExists(app, folderPath);
 
 	const filePath = await getUniqueTaskFilePath(app, folderPath, input.title);
@@ -43,12 +45,38 @@ export async function createLocalTaskNote(
 		? buildTodoistUrl(todoistId, settings)
 		: '';
 	const description = input.description?.trim() ?? '';
+	const deadlineDate = input.todoistDeadlineDate?.trim() ?? '';
+	const priority = input.todoistPriority ?? 1;
+	const createdDateStr = formatCreatedDate(now);
+
+	if (settings.noteTemplate?.trim()) {
+		const context: TaskTemplateContext = {
+			title: input.title,
+			description,
+			due_date: dueDate,
+			due_string: dueString,
+			deadline_date: deadlineDate,
+			priority,
+			priority_label: priorityLabel(priority),
+			project: effectiveProjectName,
+			project_id: effectiveProjectId,
+			section: effectiveSectionName,
+			section_id: effectiveSectionId,
+			todoist_id: todoistId,
+			url: todoistUrl,
+			tags: defaultTag ?? '',
+			created: createdDateStr,
+		};
+		const content = resolveTemplateVars(settings.noteTemplate, now, context);
+		return app.vault.create(filePath, content);
+	}
 
 	const frontmatter = [
 		'---',
 		`${p.taskStatus}: open`,
 		`${p.taskDone}: false`,
-		`${p.created}: "${formatCreatedDate(now)}"`,
+		`${p.created}: "${createdDateStr}"`,
+		`${p.todoistCreatedDate}: "${createdDateStr}"`,
 		`${p.modified}: "${formatModifiedDate(now)}"`,
 		`${p.tags}:`,
 		defaultTag ? `  - ${defaultTag}` : '  - tasks',
@@ -61,9 +89,14 @@ export async function createLocalTaskNote(
 		`${p.todoistProjectName}: "${escapeDoubleQuotes(effectiveProjectName)}"`,
 		`${p.todoistSectionId}: "${escapeDoubleQuotes(effectiveSectionId)}"`,
 		`${p.todoistSectionName}: "${escapeDoubleQuotes(effectiveSectionName)}"`,
+		`${p.todoistPriority}: ${priority}`,
+		`${p.todoistPriorityLabel}: "${priorityLabel(priority)}"`,
 		`${p.todoistDue}: "${escapeDoubleQuotes(dueDate)}"`,
+		`${p.todoistDueDateTyped}: ${dueDate ? `"${escapeDoubleQuotes(dueDate)}"` : 'null'}`,
 		`${p.todoistDueString}: "${escapeDoubleQuotes(dueString)}"`,
 		`${p.todoistIsRecurring}: ${isRecurring ? 'true' : 'false'}`,
+		deadlineDate ? `${p.todoistDeadline}: "${escapeDoubleQuotes(deadlineDate)}"` : `${p.todoistDeadline}: null`,
+		deadlineDate ? `${p.todoistDeadlineDateTyped}: "${escapeDoubleQuotes(deadlineDate)}"` : `${p.todoistDeadlineDateTyped}: null`,
 		`${p.todoistDescription}: "${escapeDoubleQuotes(description)}"`,
 		todoistUrl ? `${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"` : `${p.todoistUrl}: ""`,
 		`${p.todoistSyncStatus}: "${input.todoistSync ? 'queued_local_create' : 'local_only'}"`,
@@ -92,14 +125,28 @@ export function buildTodoistUrl(todoistId: string, settings: TaskTodoistSettings
 	return `https://app.todoist.com/app/task/${todoistId}`;
 }
 
-function buildTaskFolderPath(resolvedBaseFolder: string, settings: TaskTodoistSettings, projectName?: string): string {
-	if (settings.useProjectSubfolders && projectName?.trim()) {
-		const sanitized = sanitizeFileName(projectName.trim());
-		if (sanitized) {
-			return `${resolvedBaseFolder}/${sanitized}`;
+function buildTaskFolderPath(
+	resolvedBaseFolder: string,
+	settings: TaskTodoistSettings,
+	projectName?: string,
+	sectionName?: string,
+): string {
+	if (!settings.useProjectSubfolders || !projectName?.trim()) {
+		return resolvedBaseFolder;
+	}
+	const sanitizedProject = sanitizeFileName(projectName.trim());
+	if (!sanitizedProject) {
+		return resolvedBaseFolder;
+	}
+	const projectPath = `${resolvedBaseFolder}/${sanitizedProject}`;
+
+	if (settings.useSectionSubfolders && sectionName?.trim()) {
+		const sanitizedSection = sanitizeFileName(sectionName.trim());
+		if (sanitizedSection) {
+			return `${projectPath}/${sanitizedSection}`;
 		}
 	}
-	return resolvedBaseFolder;
+	return projectPath;
 }
 
 async function ensureFolderExists(app: App, folderPath: string): Promise<void> {
@@ -136,7 +183,7 @@ async function getUniqueTaskFilePath(app: App, tasksFolderPath: string, taskTitl
 	}
 }
 
-function sanitizeFileName(value: string): string {
+export function sanitizeFileName(value: string): string {
 	return value
 		.replace(/[\\/:*?"<>|]/g, ' ')
 		.replace(/\s+/g, ' ')

@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type TaskTodoistPlugin from './main';
 import { DEFAULT_PROP_NAMES } from './settings';
-import type { ArchiveMode, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
+import type { ArchiveMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
 export class TaskTodoistSettingTab extends PluginSettingTab {
 	plugin: TaskTodoistPlugin;
@@ -62,7 +62,21 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.useProjectSubfolders).onChange(async (value) => {
 					this.plugin.settings.useProjectSubfolders = value;
 					await this.plugin.saveSettings();
+					this.display();
 				});
+			});
+
+		new Setting(containerEl)
+			.setName('Use section subfolders')
+			.setDesc('Further nest task notes by section within the project subfolder (e.g. Tasks/Business/Urgent/Task.md). Requires project subfolders to be enabled.')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.useSectionSubfolders)
+					.setDisabled(!this.plugin.settings.useProjectSubfolders)
+					.onChange(async (value) => {
+						this.plugin.settings.useSectionSubfolders = value;
+						await this.plugin.saveSettings();
+					});
 			});
 
 		new Setting(containerEl)
@@ -276,8 +290,55 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
+			.setName('Conflict resolution')
+			.setDesc('When both local and remote changed since last sync, choose which side wins.')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('local-wins', 'Local wins (default — skip remote overwrite)')
+					.addOption('remote-wins', 'Remote wins — overwrite local changes with Todoist data')
+					.setValue(this.plugin.settings.conflictResolution)
+					.onChange(async (value) => {
+						this.plugin.settings.conflictResolution = value as ConflictResolution;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
 			.setName('Last sync')
 			.setDesc(this.plugin.getLastSyncMessage());
+
+		new Setting(containerEl).setName('Note template').setHeading();
+
+		new Setting(containerEl)
+			.setName('Auto-open new note')
+			.setDesc('Automatically open the new task note in the editor after creation.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.autoOpenNewNote).onChange(async (value) => {
+					this.plugin.settings.autoOpenNewNote = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Task note template')
+			.setDesc(
+				'Full-file template for new task notes (both frontmatter and body). Leave empty to use the default auto-generated frontmatter. ' +
+				'Available variables: {{title}}, {{description}}, {{due_date}}, {{due_string}}, {{deadline_date}}, {{priority}}, {{priority_label}}, ' +
+				'{{project}}, {{project_id}}, {{section}}, {{section_id}}, {{todoist_id}}, {{url}}, {{tags}}, {{created}}, ' +
+				'{{YYYY}}, {{MM}}, {{DD}}, {{YYYY-MM-DD}}.'
+			)
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Leave empty to use the default frontmatter layout.')
+					.setValue(this.plugin.settings.noteTemplate)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTemplate = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 10;
+				textArea.inputEl.cols = 50;
+				textArea.inputEl.style.fontFamily = 'monospace';
+			});
 
 		new Setting(containerEl).setName('Task tools').setHeading();
 
@@ -337,6 +398,102 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		this.addPropNameSetting(containerEl, 'Todoist description', 'Stores the Todoist task description. The note body is your personal notes and is not synced.', 'todoistDescription');
 		this.addPropNameSetting(containerEl, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting above).', 'todoistUrl');
+		this.addPropNameSetting(containerEl, 'Due date (date type)', 'Date-typed due date for Obsidian Bases calendar views. Stores the same date as the due date field but as a pure YYYY-MM-DD.', 'todoistDueDateTyped');
+		this.addPropNameSetting(containerEl, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
+		this.addPropNameSetting(containerEl, 'Deadline date', 'Hard deadline from Todoist (separate from due date).', 'todoistDeadline');
+		this.addPropNameSetting(containerEl, 'Deadline date (date type)', 'Date-typed deadline for Obsidian Bases calendar views.', 'todoistDeadlineDateTyped');
+		this.addPropNameSetting(containerEl, 'Task created date', 'Date-typed creation date. Use in Bases to compute task age (e.g. days since created).', 'todoistCreatedDate');
+
+		new Setting(containerEl).setName('Project & section notes').setHeading();
+
+		new Setting(containerEl)
+			.setName('Create project notes')
+			.setDesc('Automatically create a note for each Todoist project encountered during sync.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.createProjectNotes).onChange(async (value) => {
+					this.plugin.settings.createProjectNotes = value;
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+
+		if (this.plugin.settings.createProjectNotes) {
+			new Setting(containerEl)
+				.setName('Project notes folder')
+				.setDesc('Folder for project notes. Leave empty to place them inside the project subfolder as _project.md (requires project subfolders).')
+				.addText((text) => {
+					text
+						.setPlaceholder('Projects')
+						.setValue(this.plugin.settings.projectNotesFolderPath)
+						.onChange(async (value) => {
+							this.plugin.settings.projectNotesFolderPath = value.trim();
+							await this.plugin.saveSettings();
+						});
+					text.inputEl.size = 32;
+				});
+
+			new Setting(containerEl)
+				.setName('Project note template')
+				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+				.addTextArea((textArea) => {
+					textArea
+						.setPlaceholder('Leave empty to use default project note layout.')
+						.setValue(this.plugin.settings.projectNoteTemplate)
+						.onChange(async (value) => {
+							this.plugin.settings.projectNoteTemplate = value;
+							await this.plugin.saveSettings();
+						});
+					textArea.inputEl.rows = 6;
+					textArea.inputEl.cols = 50;
+					textArea.inputEl.style.fontFamily = 'monospace';
+				});
+		}
+
+		new Setting(containerEl)
+			.setName('Create section notes')
+			.setDesc('Automatically create a note for each Todoist section encountered during sync. Requires project subfolders to be enabled.')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.createSectionNotes)
+					.setDisabled(!this.plugin.settings.useProjectSubfolders)
+					.onChange(async (value) => {
+						this.plugin.settings.createSectionNotes = value;
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		if (this.plugin.settings.createSectionNotes && this.plugin.settings.useProjectSubfolders) {
+			new Setting(containerEl)
+				.setName('Section notes folder')
+				.setDesc('Folder for section notes. Leave empty to place them inside the section subfolder as _section.md.')
+				.addText((text) => {
+					text
+						.setPlaceholder('Sections')
+						.setValue(this.plugin.settings.sectionNotesFolderPath)
+						.onChange(async (value) => {
+							this.plugin.settings.sectionNotesFolderPath = value.trim();
+							await this.plugin.saveSettings();
+						});
+					text.inputEl.size = 32;
+				});
+
+			new Setting(containerEl)
+				.setName('Section note template')
+				.setDesc('Full-file template for section notes. Available variables: {{section_name}}, {{section_id}}, {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+				.addTextArea((textArea) => {
+					textArea
+						.setPlaceholder('Leave empty to use default section note layout.')
+						.setValue(this.plugin.settings.sectionNoteTemplate)
+						.onChange(async (value) => {
+							this.plugin.settings.sectionNoteTemplate = value;
+							await this.plugin.saveSettings();
+						});
+					textArea.inputEl.rows = 6;
+					textArea.inputEl.cols = 50;
+					textArea.inputEl.style.fontFamily = 'monospace';
+				});
+		}
 
 		new Setting(containerEl)
 			.setName('Reset property names to defaults')

@@ -162,6 +162,10 @@ export default class TaskTodoistPlugin extends Plugin {
 			dueString: input.todoistDueString?.trim() || undefined,
 			isRecurring: Boolean(input.todoistDueString?.trim()),
 		});
+		if (this.settings.autoOpenNewNote) {
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(created);
+		}
 		return created;
 	}
 

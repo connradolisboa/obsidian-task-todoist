@@ -103,6 +103,15 @@ export function setTaskStatus(
 	}
 }
 
+/**
+ * Maps a Todoist numeric priority to a human-readable label.
+ * Todoist API: 4 = urgent (p1), 3 = high (p2), 2 = medium (p3), 1 = normal (p4).
+ */
+export function priorityLabel(priority: number): string {
+	const map: Record<number, string> = { 4: 'high', 3: 'medium', 2: 'low', 1: 'none' };
+	return map[priority] ?? 'none';
+}
+
 export function getDefaultTaskTag(settings: TaskTodoistSettings): string | null {
 	return normalizeTag(resolveTemplateVars(settings.defaultTaskTag));
 }

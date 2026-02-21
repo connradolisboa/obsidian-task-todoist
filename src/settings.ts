@@ -3,6 +3,7 @@ export const DEFAULT_TODOIST_TOKEN_SECRET_NAME = 'todoist-api';
 export type ArchiveMode = 'none' | 'move-to-archive-folder' | 'mark-local-done';
 export type ImportProjectScope = 'all-projects' | 'allow-list-by-name';
 export type TodoistLinkStyle = 'app' | 'web';
+export type ConflictResolution = 'local-wins' | 'remote-wins';
 
 export interface PropNames {
 	// Core task properties
@@ -38,6 +39,12 @@ export interface PropNames {
 	// New properties
 	todoistDescription: string;
 	todoistUrl: string;
+	// Date-typed properties for Obsidian Bases
+	todoistDueDateTyped: string;
+	todoistPriorityLabel: string;
+	todoistDeadline: string;
+	todoistDeadlineDateTyped: string;
+	todoistCreatedDate: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -71,6 +78,11 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistLastImportedAt: 'todoist_last_imported_at',
 	todoistDescription: 'todoist_description',
 	todoistUrl: 'todoist_url',
+	todoistDueDateTyped: 'task_due_date',
+	todoistPriorityLabel: 'task_priority_label',
+	todoistDeadline: 'todoist_deadline',
+	todoistDeadlineDateTyped: 'task_deadline_date',
+	todoistCreatedDate: 'task_created_date',
 };
 
 export interface TaskTodoistSettings {
@@ -91,7 +103,17 @@ export interface TaskTodoistSettings {
 	// New settings
 	propNames: PropNames;
 	useProjectSubfolders: boolean;
+	useSectionSubfolders: boolean;
 	todoistLinkStyle: TodoistLinkStyle;
+	conflictResolution: ConflictResolution;
+	noteTemplate: string;
+	autoOpenNewNote: boolean;
+	createProjectNotes: boolean;
+	projectNotesFolderPath: string;
+	projectNoteTemplate: string;
+	createSectionNotes: boolean;
+	sectionNotesFolderPath: string;
+	sectionNoteTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -111,5 +133,15 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	todoistTokenSecretName: DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	propNames: { ...DEFAULT_PROP_NAMES },
 	useProjectSubfolders: false,
+	useSectionSubfolders: false,
 	todoistLinkStyle: 'web',
+	conflictResolution: 'local-wins',
+	noteTemplate: '',
+	autoOpenNewNote: false,
+	createProjectNotes: false,
+	projectNotesFolderPath: '',
+	projectNoteTemplate: '',
+	createSectionNotes: false,
+	sectionNotesFolderPath: '',
+	sectionNoteTemplate: '',
 };

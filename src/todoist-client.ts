@@ -20,6 +20,10 @@ export interface TodoistItem {
 	checked?: boolean;
 	is_deleted?: boolean;
 	responsible_uid?: string | null;
+	deadline?: {
+		date: string;
+		lang?: string | null;
+	} | null;
 }
 
 export interface TodoistProject {
@@ -316,6 +320,7 @@ function normalizeItems(rawItems: Array<Record<string, unknown>>): TodoistItem[]
 			checked: Boolean(raw.checked),
 			is_deleted: Boolean(raw.is_deleted),
 			responsible_uid: toOptionalId(raw.responsible_uid),
+			deadline: toDeadline(raw.deadline),
 		});
 	}
 	return items;
@@ -427,4 +432,19 @@ function toStringArray(value: unknown): string[] {
 	}
 
 	return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function toDeadline(value: unknown): { date: string; lang?: string | null } | null {
+	if (!value || typeof value !== 'object') {
+		return null;
+	}
+	const dl = value as { date?: unknown; lang?: unknown };
+	const date = typeof dl.date === 'string' && dl.date.trim() ? dl.date : null;
+	if (!date) {
+		return null;
+	}
+	return {
+		date,
+		lang: typeof dl.lang === 'string' ? dl.lang : null,
+	};
 }

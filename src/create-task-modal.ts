@@ -16,6 +16,7 @@ export class CreateTaskModal extends Modal {
 	private todoistSectionName = '';
 	private todoistDueDate = '';
 	private todoistRecurrence = '';
+	private todoistPriority = 1;
 	private todoistSync = true;
 	private parsedHintEl: HTMLDivElement | null = null;
 	private dueDateInput: TextComponent | null = null;
@@ -187,6 +188,21 @@ export class CreateTaskModal extends Modal {
 			});
 
 		new Setting(contentEl)
+			.setName('Priority')
+			.setDesc('Todoist task priority.')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('1', 'None (p4)')
+					.addOption('2', 'Low (p3)')
+					.addOption('3', 'Medium (p2)')
+					.addOption('4', 'High (p1)')
+					.setValue(String(this.todoistPriority))
+					.onChange((value) => {
+						this.todoistPriority = parseInt(value, 10) || 1;
+					});
+			});
+
+		new Setting(contentEl)
 			.setName('Sync with todoist')
 			.setDesc('Marks this task note as eligible for todoist sync.')
 			.addToggle((toggle) => {
@@ -262,6 +278,7 @@ export class CreateTaskModal extends Modal {
 			todoistSectionName: enforcedSectionName,
 			todoistDueDate: finalDueDate,
 			todoistDueString: finalRecurrence,
+			todoistPriority: this.todoistPriority,
 		});
 		const parsedSummary = finalRecurrence
 			? ` • Parsed recurrence: ${finalRecurrence}`

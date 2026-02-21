@@ -9,12 +9,13 @@ import {
 	getTaskStatus,
 	getTaskTitle,
 	getPropNames,
+	priorityLabel,
 	setTaskStatus,
 	setTaskTitle,
 	touchModifiedDate,
 } from './task-frontmatter';
-import { buildTodoistUrl } from './task-note-factory';
-import { resolveTemplateVars } from './template-variables';
+import { buildTodoistUrl, sanitizeFileName } from './task-note-factory';
+import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
 
 interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
@@ -90,11 +91,26 @@ export class TaskNoteRepository {
 		const existingByTodoistId = await this.buildTodoistIdIndexInTaskFolder();
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
 		const pendingParents: ParentAssignment[] = [];
+		const seenProjectIds = new Set<string>();
+		const seenSectionIds = new Set<string>();
 
 		let created = 0;
 		let updated = 0;
 
 		for (const item of items) {
+			// Ensure project/section notes before task files
+			if (this.settings.createProjectNotes && !seenProjectIds.has(item.project_id)) {
+				seenProjectIds.add(item.project_id);
+				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+				await this.ensureProjectNote(item.project_id, projectName);
+			}
+			if (this.settings.createSectionNotes && this.settings.useProjectSubfolders && item.section_id && !seenSectionIds.has(item.section_id)) {
+				seenSectionIds.add(item.section_id);
+				const sectionName = maps.sectionNameById.get(item.section_id) ?? 'Unknown';
+				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+				await this.ensureSectionNote(item.section_id, sectionName, item.project_id, projectName);
+			}
+
 			const existingFile = existingByTodoistId.get(item.id);
 			const upsertResult = existingFile
 				? await this.updateTaskFile(existingFile, item, maps)
@@ -121,6 +137,76 @@ export class TaskNoteRepository {
 		await this.applyChildMetadata(combinedIndex, pendingParents);
 
 		return { created, updated };
+	}
+
+	private async ensureProjectNote(projectId: string, projectName: string): Promise<void> {
+		const now = new Date();
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+
+		let folderPath: string;
+		let fileName: string;
+		if (this.settings.projectNotesFolderPath?.trim()) {
+			folderPath = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
+			fileName = `${sanitizeFileName(projectName) || projectId}.md`;
+		} else if (this.settings.useProjectSubfolders) {
+			const sanitizedProject = sanitizeFileName(projectName) || projectId;
+			folderPath = normalizePath(`${resolvedFolder}/${sanitizedProject}`);
+			fileName = `_project.md`;
+		} else {
+			return; // No sensible path without project subfolders
+		}
+
+		await this.ensureFolderExists(folderPath);
+		const filePath = normalizePath(`${folderPath}/${fileName}`);
+		if (this.app.vault.getAbstractFileByPath(filePath)) {
+			return; // Already exists
+		}
+
+		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId };
+		let content: string;
+		if (this.settings.projectNoteTemplate?.trim()) {
+			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
+		} else {
+			content = `---\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+		}
+		await this.app.vault.create(filePath, content);
+	}
+
+	private async ensureSectionNote(sectionId: string, sectionName: string, projectId: string, projectName: string): Promise<void> {
+		const now = new Date();
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+
+		let folderPath: string;
+		let fileName: string;
+		if (this.settings.sectionNotesFolderPath?.trim()) {
+			folderPath = normalizePath(resolveTemplateVars(this.settings.sectionNotesFolderPath));
+			fileName = `${sanitizeFileName(sectionName) || sectionId}.md`;
+		} else {
+			const sanitizedProject = sanitizeFileName(projectName) || projectId;
+			const sanitizedSection = sanitizeFileName(sectionName) || sectionId;
+			folderPath = normalizePath(`${resolvedFolder}/${sanitizedProject}/${sanitizedSection}`);
+			fileName = `_section.md`;
+		}
+
+		await this.ensureFolderExists(folderPath);
+		const filePath = normalizePath(`${folderPath}/${fileName}`);
+		if (this.app.vault.getAbstractFileByPath(filePath)) {
+			return; // Already exists
+		}
+
+		const context: SectionTemplateContext = {
+			section_name: sectionName,
+			section_id: sectionId,
+			project_name: projectName,
+			project_id: projectId,
+		};
+		let content: string;
+		if (this.settings.sectionNoteTemplate?.trim()) {
+			content = resolveTemplateVars(this.settings.sectionNoteTemplate, now, context);
+		} else {
+			content = `---\nsection_name: "${sectionName}"\nsection_id: "${sectionId}"\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+		}
+		await this.app.vault.create(filePath, content);
 	}
 
 	async repairMalformedSignatureFrontmatterLines(): Promise<number> {
@@ -421,7 +507,8 @@ export class TaskNoteRepository {
 
 	private async createTaskFile(item: TodoistItem, maps: ProjectSectionMaps): Promise<UpsertResult & { file: TFile }> {
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-		const filePath = await this.getUniqueTaskFilePath(item.content, item.id, projectName);
+		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
+		const filePath = await this.getUniqueTaskFilePath(item.content, item.id, projectName, sectionName);
 		const markdown = buildNewFileContent(item, maps.projectNameById, maps.sectionNameById, this.settings);
 		const file = await this.app.vault.create(filePath, markdown);
 		return { created: 1, updated: 0, file };
@@ -439,8 +526,19 @@ export class TaskNoteRepository {
 			return { created: 0, updated: 0, file };
 		}
 
+		// Conflict resolution: if the file has local unsent changes and local-wins is set, skip remote update.
+		const syncStatus = typeof cachedFrontmatter?.[p.todoistSyncStatus] === 'string'
+			? cachedFrontmatter[p.todoistSyncStatus] as string
+			: '';
+		if (syncStatus === 'dirty_local' && this.settings.conflictResolution === 'local-wins') {
+			return { created: 0, updated: 0, file };
+		}
+
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
 		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
+		const dueDate = item.due?.date ?? '';
+		const deadlineDate = item.deadline?.date ?? '';
+		const priority = item.priority ?? 1;
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
@@ -454,10 +552,14 @@ export class TaskNoteRepository {
 			data[p.todoistProjectName] = projectName;
 			data[p.todoistSectionId] = item.section_id ?? '';
 			data[p.todoistSectionName] = sectionName;
-			data[p.todoistPriority] = item.priority ?? 1;
-			data[p.todoistDue] = item.due?.date ?? '';
+			data[p.todoistPriority] = priority;
+			data[p.todoistPriorityLabel] = priorityLabel(priority);
+			data[p.todoistDue] = dueDate;
+			data[p.todoistDueDateTyped] = dueDate || null;
 			data[p.todoistDueString] = item.due?.string ?? '';
 			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
+			data[p.todoistDeadline] = deadlineDate || null;
+			data[p.todoistDeadlineDateTyped] = deadlineDate || null;
 			data[p.todoistDescription] = item.description?.trim() ?? '';
 			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
 			data[p.todoistLastImportedSignature] = remoteImportSignature;
@@ -468,7 +570,7 @@ export class TaskNoteRepository {
 				isRecurring: Boolean(item.due?.is_recurring),
 				projectId: item.project_id,
 				sectionId: item.section_id ?? undefined,
-				dueDate: item.due?.date ?? '',
+				dueDate,
 				dueString: item.due?.string ?? '',
 			});
 			data[p.todoistLabels] = item.labels ?? [];
@@ -610,16 +712,23 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string, projectName?: string): Promise<string> {
+	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string, projectName?: string, sectionName?: string): Promise<string> {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		let folder = normalizePath(resolvedFolder);
 
 		if (this.settings.useProjectSubfolders && projectName?.trim()) {
-			const sanitized = sanitizeFileName(projectName.trim());
-			if (sanitized) {
-				const subFolder = normalizePath(`${folder}/${sanitized}`);
-				await this.ensureFolderExists(subFolder);
-				folder = subFolder;
+			const sanitizedProject = sanitizeFileName(projectName.trim());
+			if (sanitizedProject) {
+				folder = normalizePath(`${folder}/${sanitizedProject}`);
+				await this.ensureFolderExists(folder);
+
+				if (this.settings.useSectionSubfolders && sectionName?.trim()) {
+					const sanitizedSection = sanitizeFileName(sectionName.trim());
+					if (sanitizedSection) {
+						folder = normalizePath(`${folder}/${sanitizedSection}`);
+						await this.ensureFolderExists(folder);
+					}
+				}
 			}
 		}
 
@@ -667,11 +776,38 @@ function buildNewFileContent(
 	const sectionName = item.section_id ? (sectionNameById.get(item.section_id) ?? '') : '';
 	const description = item.description?.trim() ?? '';
 	const todoistUrl = buildTodoistUrl(item.id, settings);
+	const dueDate = item.due?.date ?? '';
+	const deadlineDate = item.deadline?.date ?? '';
+	const priority = item.priority ?? 1;
+	const createdDateStr = formatCreatedDate(now);
+
+	if (settings.noteTemplate?.trim()) {
+		const context = {
+			title: item.content,
+			description,
+			due_date: dueDate,
+			due_string: item.due?.string ?? '',
+			deadline_date: deadlineDate,
+			priority,
+			priority_label: priorityLabel(priority),
+			project: projectName,
+			project_id: item.project_id,
+			section: sectionName,
+			section_id: item.section_id ?? '',
+			todoist_id: item.id,
+			url: todoistUrl,
+			tags: defaultTag,
+			created: createdDateStr,
+		};
+		return resolveTemplateVars(settings.noteTemplate, now, context);
+	}
+
 	const yaml = [
 		'---',
 		`${p.taskStatus}: ${item.checked ? 'done' : 'open'}`,
 		`${p.taskDone}: ${item.checked ? 'true' : 'false'}`,
-		`${p.created}: "${formatCreatedDate(now)}"`,
+		`${p.created}: "${createdDateStr}"`,
+		`${p.todoistCreatedDate}: "${createdDateStr}"`,
 		`${p.modified}: "${formatModifiedDate(now)}"`,
 		`${p.tags}:`,
 		`  - ${defaultTag}`,
@@ -684,10 +820,14 @@ function buildNewFileContent(
 		`${p.todoistProjectName}: ${toQuotedYaml(projectName)}`,
 		`${p.todoistSectionId}: "${escapeDoubleQuotes(item.section_id ?? '')}"`,
 		`${p.todoistSectionName}: ${toQuotedYaml(sectionName)}`,
-		`${p.todoistPriority}: ${item.priority ?? 1}`,
-		`${p.todoistDue}: "${escapeDoubleQuotes(item.due?.date ?? '')}"`,
+		`${p.todoistPriority}: ${priority}`,
+		`${p.todoistPriorityLabel}: "${priorityLabel(priority)}"`,
+		`${p.todoistDue}: "${escapeDoubleQuotes(dueDate)}"`,
+		`${p.todoistDueDateTyped}: ${dueDate ? toQuotedYaml(dueDate) : 'null'}`,
 		`${p.todoistDueString}: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
 		`${p.todoistIsRecurring}: ${item.due?.is_recurring ? 'true' : 'false'}`,
+		`${p.todoistDeadline}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
+		`${p.todoistDeadlineDateTyped}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
 		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
 		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 		`${p.todoistLastImportedSignature}: "${escapeDoubleQuotes(buildRemoteImportSignature(item, {
@@ -701,7 +841,7 @@ function buildNewFileContent(
 			isRecurring: Boolean(item.due?.is_recurring),
 			projectId: item.project_id,
 			sectionId: item.section_id ?? undefined,
-			dueDate: item.due?.date ?? '',
+			dueDate,
 			dueString: item.due?.string ?? '',
 		}))}"`,
 		`${p.todoistLabels}: [${(item.labels ?? []).map((label) => toQuotedYamlInline(label)).join(', ')}]`,
@@ -726,14 +866,6 @@ function getFolderPath(path: string): string {
 		return '';
 	}
 	return path.slice(0, slashIndex);
-}
-
-function sanitizeFileName(value: string): string {
-	return value
-		.replace(/[\\/:*?"<>|]/g, ' ')
-		.replace(/\s+/g, ' ')
-		.trim()
-		.slice(0, 80);
 }
 
 function toQuotedYaml(value: string): string {
@@ -804,6 +936,7 @@ function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps)
 		item.due?.is_recurring ? 1 : 0,
 		item.parent_id ?? '',
 		(item.labels ?? []).join('|'),
+		item.deadline?.date ?? '',
 	]));
 }
 
