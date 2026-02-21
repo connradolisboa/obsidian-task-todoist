@@ -151,7 +151,7 @@ export class TaskNoteRepository {
 		} else if (this.settings.useProjectSubfolders) {
 			const sanitizedProject = sanitizeFileName(projectName) || projectId;
 			folderPath = normalizePath(`${resolvedFolder}/${sanitizedProject}`);
-			fileName = `_project.md`;
+			fileName = `${sanitizedProject}.md`;
 		} else {
 			return; // No sensible path without project subfolders
 		}
@@ -185,7 +185,7 @@ export class TaskNoteRepository {
 			const sanitizedProject = sanitizeFileName(projectName) || projectId;
 			const sanitizedSection = sanitizeFileName(sectionName) || sectionId;
 			folderPath = normalizePath(`${resolvedFolder}/${sanitizedProject}/${sanitizedSection}`);
-			fileName = `_section.md`;
+			fileName = `${sanitizedSection}.md`;
 		}
 
 		await this.ensureFolderExists(folderPath);
