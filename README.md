@@ -78,4 +78,4 @@ This project is open to contributions. If you find a bug or have a feature reque
 
 ## License
 
-This plugin is licensed under the MIT License. See the `LICENSE` file for more details.
+This plugin is licensed under the Zero-Clause BSD License. See the `LICENSE` file for more details.
