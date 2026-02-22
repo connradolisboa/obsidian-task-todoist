@@ -910,7 +910,91 @@ export class TaskNoteRepository {
 		const filePath = await this.getUniqueTaskFilePath(item.content, item.id, projectName, sectionName);
 		const markdown = buildNewFileContent(item, maps, this.settings);
 		const file = await this.app.vault.create(filePath, markdown);
+		// When a template is used, hydrate all required frontmatter properties.
+		// The template provides layout/body structure; hydration ensures all sync-critical
+		// properties are correctly set (including wikilinks and signatures not available as tokens).
+		if (this.settings.noteTemplate?.trim()) {
+			await this.hydrateTaskNoteFrontmatter(file, item, maps);
+		}
 		return { created: 1, updated: 0, file };
+	}
+
+	private async hydrateTaskNoteFrontmatter(file: TFile, item: TodoistItem, maps: ProjectSectionMaps): Promise<void> {
+		const now = new Date();
+		const p = getPropNames(this.settings);
+		const defaultTag = getDefaultTaskTag(this.settings) ?? 'tasks';
+		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
+		const projectLink = maps.projectFileById?.get(item.project_id)
+			? toWikiLink(maps.projectFileById.get(item.project_id)!.path)
+			: '';
+		const sectionLink = item.section_id && maps.sectionFileById?.get(item.section_id)
+			? toWikiLink(maps.sectionFileById.get(item.section_id)!.path)
+			: '';
+		const description = item.description?.trim() ?? '';
+		const todoistUrl = buildTodoistUrl(item.id, this.settings);
+		const dueDate = item.due?.date ?? '';
+		const deadlineDate = item.deadline?.date ?? '';
+		const priority = item.priority ?? 1;
+		const createdDateStr = formatCreatedDate(now);
+		const remoteImportSig = buildRemoteImportSignature(item, maps);
+		const syncedSig = buildTodoistSyncSignature({
+			title: item.content,
+			description,
+			isDone: Boolean(item.checked),
+			isRecurring: Boolean(item.due?.is_recurring),
+			projectId: item.project_id,
+			sectionId: item.section_id ?? undefined,
+			dueDate,
+			dueString: item.due?.string ?? '',
+		});
+
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+
+			// vault_id: always generate fresh UUID for each new note
+			data[p.vaultId] = generateUuid();
+
+			// Fill in if missing or empty — template may have used tokens like {{created}}
+			if (!data[p.created]) data[p.created] = createdDateStr;
+			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
+			const existingTags = data[p.tags];
+			if (!existingTags || (Array.isArray(existingTags) && (existingTags as unknown[]).length === 0)) {
+				data[p.tags] = [defaultTag];
+			}
+			if (!data[p.links]) data[p.links] = [];
+
+			// Task fields: always set to reflect Todoist truth
+			setTaskTitle(data, item.content, this.settings);
+			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
+
+			// All Todoist sync properties: always overwrite
+			data[p.todoistSync] = true;
+			data[p.todoistSyncStatus] = 'synced';
+			data[p.todoistId] = item.id;
+			data[p.todoistProjectId] = item.project_id;
+			data[p.todoistProjectName] = projectName;
+			data[p.todoistSectionId] = item.section_id ?? '';
+			data[p.todoistSectionName] = sectionName;
+			data[p.todoistProjectLink] = projectLink;
+			data[p.todoistSectionLink] = sectionLink;
+			data[p.todoistPriority] = priority;
+			data[p.todoistPriorityLabel] = priorityLabel(priority);
+			data[p.todoistDue] = dueDate;
+			data[p.todoistDueString] = item.due?.string ?? '';
+			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
+			data[p.todoistDeadline] = deadlineDate || null;
+			data[p.todoistDescription] = description;
+			data[p.todoistUrl] = todoistUrl;
+			data[p.todoistLabels] = item.labels ?? [];
+			data[p.todoistParentId] = item.parent_id ?? '';
+			data[p.todoistHasChildren] = false;
+			data[p.todoistChildTaskCount] = 0;
+			data[p.todoistChildTasks] = [];
+			data[p.todoistLastImportedSignature] = remoteImportSig;
+			data[p.todoistLastSyncedSignature] = syncedSig;
+			data[p.todoistLastImportedAt] = new Date().toISOString();
+		});
 	}
 
 	private async updateTaskFile(file: TFile, item: TodoistItem, maps: ProjectSectionMaps): Promise<UpsertResult & { file: TFile }> {
@@ -1361,6 +1445,8 @@ function buildNewFileContent(
 			url: todoistUrl,
 			tags: defaultTag,
 			created: createdDateStr,
+			project_link: projectLink,
+			section_link: sectionLink,
 		};
 		return resolveTemplateVars(settings.noteTemplate, now, context);
 	}

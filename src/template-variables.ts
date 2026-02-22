@@ -35,6 +35,9 @@ export interface TaskTemplateContext {
 	url?: string;
 	tags?: string;
 	created?: string;
+	project_link?: string;
+	section_link?: string;
+	parent_task_link?: string;
 }
 
 export interface ProjectTemplateContext {
@@ -100,7 +103,10 @@ export function resolveTemplateVars(
 			.replace(/\{\{todoist_id\}\}/g, tc.todoist_id ?? '')
 			.replace(/\{\{url\}\}/g, tc.url ?? '')
 			.replace(/\{\{tags\}\}/g, tc.tags ?? '')
-			.replace(/\{\{created\}\}/g, tc.created ?? `${yyyy}-${mm}-${dd}`);
+			.replace(/\{\{created\}\}/g, tc.created ?? `${yyyy}-${mm}-${dd}`)
+			.replace(/\{\{project_link\}\}/g, tc.project_link ?? '')
+			.replace(/\{\{section_link\}\}/g, tc.section_link ?? '')
+			.replace(/\{\{parent_task_link\}\}/g, tc.parent_task_link ?? '');
 		return result;
 	}
 

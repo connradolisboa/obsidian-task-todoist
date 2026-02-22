@@ -66,9 +66,51 @@ export async function createLocalTaskNote(
 			url: todoistUrl,
 			tags: defaultTag ?? '',
 			created: createdDateStr,
+			parent_task_link: input.parentTaskLink?.trim() ?? '',
 		};
 		const content = resolveTemplateVars(settings.noteTemplate, now, context);
-		return app.vault.create(filePath, content);
+		const file = await app.vault.create(filePath, content);
+		// Hydrate all required frontmatter properties. The template provides layout/body
+		// structure; hydration ensures all properties are set even if the template only
+		// listed property names with empty values (or omitted them entirely).
+		await app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+			// vault_id: always generate a fresh UUID for each new note
+			data[p.vaultId] = generateUuid();
+			// Fill in if missing or empty
+			if (!data[p.created]) data[p.created] = createdDateStr;
+			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
+			const existingTags = data[p.tags];
+			if (!existingTags || (Array.isArray(existingTags) && (existingTags as unknown[]).length === 0)) {
+				data[p.tags] = defaultTag ? [defaultTag] : ['tasks'];
+			}
+			if (!data[p.links]) data[p.links] = [];
+			// Task fields: always set
+			data[p.taskTitle] = input.title;
+			data[p.taskStatus] = 'Open';
+			data[p.taskDone] = false;
+			if (input.parentTaskLink?.trim()) {
+				data[p.parentTask] = input.parentTaskLink.trim();
+			}
+			// Todoist sync properties: always set
+			data[p.todoistSync] = input.todoistSync;
+			data[p.todoistId] = todoistId;
+			data[p.todoistProjectId] = effectiveProjectId;
+			data[p.todoistProjectName] = effectiveProjectName;
+			data[p.todoistSectionId] = effectiveSectionId;
+			data[p.todoistSectionName] = effectiveSectionName;
+			data[p.todoistPriority] = priority;
+			data[p.todoistPriorityLabel] = priorityLabel(priority);
+			data[p.todoistDue] = dueDate;
+			data[p.todoistDueString] = dueString;
+			data[p.todoistIsRecurring] = isRecurring;
+			data[p.todoistDeadline] = deadlineDate || null;
+			data[p.todoistDescription] = description;
+			data[p.todoistUrl] = todoistUrl;
+			data[p.todoistSyncStatus] = input.todoistSync ? 'queued_local_create' : 'local_only';
+			data[p.localUpdatedAt] = new Date().toISOString();
+		});
+		return file;
 	}
 
 	const frontmatter = [
