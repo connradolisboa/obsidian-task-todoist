@@ -1,6 +1,6 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
-import { formatCreatedDate, formatModifiedDate, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
+import { formatCreatedDate, formatModifiedDate, generateUuid, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
 import { resolveTemplateVars, TaskTemplateContext } from './template-variables';
 
 export interface LocalTaskNoteInput {
@@ -73,6 +73,7 @@ export async function createLocalTaskNote(
 
 	const frontmatter = [
 		'---',
+		`${p.vaultId}: "${generateUuid()}"`,
 		`${p.taskStatus}: open`,
 		`${p.taskDone}: false`,
 		`${p.created}: "${createdDateStr}"`,

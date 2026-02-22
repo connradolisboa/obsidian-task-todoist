@@ -659,6 +659,10 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Project ID', 'Frontmatter key written into project notes to track the Todoist project ID.', 'projectId');
 		this.addPropNameSetting(el, 'Section ID', 'Frontmatter key written into section notes to track the Todoist section ID.', 'sectionId');
 
+		new Setting(el).setName('Vault identity').setHeading();
+
+		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
+
 		new Setting(el)
 			.setName('Reset property names to defaults')
 			.setDesc('Restore all property names to their default values.')

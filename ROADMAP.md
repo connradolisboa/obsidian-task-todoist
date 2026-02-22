@@ -85,13 +85,13 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 ### PR 8: Add `vault_id` UUID to all plugin notes
 > Each note gets a stable, write-once UUID at creation time. Existing notes are backfilled on first sync.
 
-- [ ] Add exported `generateUuid()` to `src/task-frontmatter.ts` (uses `crypto.randomUUID()` with a `Date.now()` fallback)
-- [ ] Add `vaultId: string` to `PropNames` in `src/settings.ts` (default: `'vault_id'`)
-- [ ] Write `vault_id` at creation time in four places: `buildNewFileContent()`, `createLocalTaskNote()`, `ensureProjectNote()`, `ensureSectionNote()`
-- [ ] Add `backfillVaultIds(): Promise<number>` method to `TaskNoteRepository` — scans vault-wide, skips notes with no plugin ID, skips notes that already have `vault_id`, writes a new UUID via `processFrontMatter`
-- [ ] Call `repository.backfillVaultIds()` in `runImportSync()` (`src/sync-service.ts`) after `repairMalformedSignatureFrontmatterLines()`
-- [ ] Add `vaultIdIndex: Map<string, TFile>` to `buildVaultIndexes()` return type
-- [ ] Add `addPropNameSetting()` for `vaultId` in `src/settings-tab.ts` with a note that this is write-once
+- [x] Add exported `generateUuid()` to `src/task-frontmatter.ts` (uses `crypto.randomUUID()` with a `Date.now()` fallback)
+- [x] Add `vaultId: string` to `PropNames` in `src/settings.ts` (default: `'vault_id'`)
+- [x] Write `vault_id` at creation time in four places: `buildNewFileContent()`, `createLocalTaskNote()`, `ensureProjectNote()`, `ensureSectionNote()`
+- [x] Add `backfillVaultIds(): Promise<number>` method to `TaskNoteRepository` — scans vault-wide, skips notes with no plugin ID, skips notes that already have `vault_id`, writes a new UUID via `processFrontMatter`
+- [x] Call `repository.backfillVaultIds()` in `runImportSync()` (`src/sync-service.ts`) after `repairMalformedSignatureFrontmatterLines()`
+- [x] Add `vaultIdIndex: Map<string, TFile>` to `buildVaultIndexes()` return type
+- [x] Add `addPropNameSetting()` for `vaultId` in `src/settings-tab.ts` with a note that this is write-once
 
 ### PR 9: Detect duplicate `todoist_id` in vault
 > When two vault files share the same `todoist_id`, emit a console warning and an Obsidian Notice rather than silently resolving non-deterministically.

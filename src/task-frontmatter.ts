@@ -157,3 +157,14 @@ function normalizeTag(value: string | undefined): string | null {
 function pad2(value: number): string {
 	return String(value).padStart(2, '0');
 }
+
+export function generateUuid(): string {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID();
+	}
+	// Fallback pseudo-UUID v4
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+		const r = Math.floor((Date.now() * Math.random() * 16)) % 16;
+		return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+	});
+}

@@ -5,6 +5,7 @@ import {
 	applyStandardTaskFrontmatter,
 	formatCreatedDate,
 	formatModifiedDate,
+	generateUuid,
 	getDefaultTaskTag,
 	getTaskStatus,
 	getTaskTitle,
@@ -192,7 +193,7 @@ export class TaskNoteRepository {
 		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
 		} else {
-			content = `---\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+			content = `---\n${p.vaultId}: "${generateUuid()}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
 		}
 		const file = await this.app.vault.create(filePath, content);
 		projectIndex.set(projectId, file);
@@ -240,7 +241,7 @@ export class TaskNoteRepository {
 			content = resolveTemplateVars(this.settings.sectionNoteTemplate, now, context);
 		} else {
 			const projectLinkLine = projectLink ? `project_link: "${projectLink}"\n` : '';
-			content = `---\nsection_name: "${sectionName}"\n${p.sectionId}: "${sectionId}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
+			content = `---\n${p.vaultId}: "${generateUuid()}"\nsection_name: "${sectionName}"\n${p.sectionId}: "${sectionId}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
 		}
 		await this.app.vault.create(filePath, content);
 	}
@@ -782,10 +783,12 @@ export class TaskNoteRepository {
 		taskIndex: Map<string, TFile>;
 		projectIndex: Map<string, TFile>;
 		sectionIndex: Map<string, TFile>;
+		vaultIdIndex: Map<string, TFile>;
 	} {
 		const taskIndex = new Map<string, TFile>();
 		const projectIndex = new Map<string, TFile>();
 		const sectionIndex = new Map<string, TFile>();
+		const vaultIdIndex = new Map<string, TFile>();
 		const p = getPropNames(this.settings);
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -813,9 +816,49 @@ export class TaskNoteRepository {
 			if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
 				sectionIndex.set(rawSectionId.trim(), file);
 			}
+
+			// Vault ID index: by vault_id frontmatter
+			const rawVaultId = fm[p.vaultId];
+			if (typeof rawVaultId === 'string' && rawVaultId.trim()) {
+				vaultIdIndex.set(rawVaultId.trim(), file);
+			}
 		}
 
-		return { taskIndex, projectIndex, sectionIndex };
+		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex };
+	}
+
+	async backfillVaultIds(): Promise<number> {
+		const p = getPropNames(this.settings);
+		let backfilled = 0;
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) {
+				continue;
+			}
+
+			// Skip notes with no plugin ID — not managed by this plugin
+			const hasTodoistId = (typeof fm[p.todoistId] === 'string' && (fm[p.todoistId] as string).trim())
+				|| typeof fm[p.todoistId] === 'number';
+			const rawProjectId = fm[p.projectId] ?? (p.projectId !== 'project_id' ? fm['project_id'] : undefined);
+			const hasProjectId = typeof rawProjectId === 'string' && rawProjectId.trim();
+			const rawSectionId = fm[p.sectionId] ?? (p.sectionId !== 'section_id' ? fm['section_id'] : undefined);
+			const hasSectionId = typeof rawSectionId === 'string' && rawSectionId.trim();
+			if (!hasTodoistId && !hasProjectId && !hasSectionId) {
+				continue;
+			}
+
+			// Skip notes that already have vault_id
+			const existingVaultId = fm[p.vaultId];
+			if (typeof existingVaultId === 'string' && existingVaultId.trim()) {
+				continue;
+			}
+
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				(frontmatter as Record<string, unknown>)[p.vaultId] = generateUuid();
+			});
+			backfilled += 1;
+		}
+		return backfilled;
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -952,6 +995,7 @@ function buildNewFileContent(
 
 	const yaml = [
 		'---',
+		`${p.vaultId}: "${generateUuid()}"`,
 		`${p.taskStatus}: ${item.checked ? 'done' : 'open'}`,
 		`${p.taskDone}: ${item.checked ? 'true' : 'false'}`,
 		`${p.created}: "${createdDateStr}"`,

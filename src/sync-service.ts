@@ -33,6 +33,7 @@ export class SyncService {
 			const todoistClient = new TodoistClient(this.token);
 			const repository = new TaskNoteRepository(this.app, this.settings);
 			await repository.repairMalformedSignatureFrontmatterLines();
+			await repository.backfillVaultIds();
 			let snapshot = await todoistClient.fetchSyncSnapshot();
 			const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
 

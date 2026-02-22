@@ -48,6 +48,8 @@ export interface PropNames {
 	// Project & section note properties
 	projectId: string;
 	sectionId: string;
+	// Stable write-once vault UUID
+	vaultId: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -88,6 +90,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistCreatedDate: 'task_created_date',
 	projectId: 'project_id',
 	sectionId: 'section_id',
+	vaultId: 'vault_id',
 };
 
 export interface TaskTodoistSettings {
