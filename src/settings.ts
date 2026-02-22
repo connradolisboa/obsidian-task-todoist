@@ -45,6 +45,9 @@ export interface PropNames {
 	todoistDeadline: string;
 	todoistDeadlineDateTyped: string;
 	todoistCreatedDate: string;
+	// Project & section note properties
+	projectId: string;
+	sectionId: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -83,6 +86,8 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistDeadline: 'todoist_deadline',
 	todoistDeadlineDateTyped: 'task_deadline_date',
 	todoistCreatedDate: 'task_created_date',
+	projectId: 'project_id',
+	sectionId: 'section_id',
 };
 
 export interface TaskTodoistSettings {

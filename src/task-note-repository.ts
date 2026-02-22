@@ -157,6 +157,7 @@ export class TaskNoteRepository {
 		}
 
 		const now = new Date();
+		const p = getPropNames(this.settings);
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
 		let folderPath: string;
@@ -191,7 +192,7 @@ export class TaskNoteRepository {
 		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
 		} else {
-			content = `---\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+			content = `---\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
 		}
 		const file = await this.app.vault.create(filePath, content);
 		projectIndex.set(projectId, file);
@@ -205,6 +206,7 @@ export class TaskNoteRepository {
 		}
 
 		const now = new Date();
+		const p = getPropNames(this.settings);
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
 		let folderPath: string;
@@ -238,7 +240,7 @@ export class TaskNoteRepository {
 			content = resolveTemplateVars(this.settings.sectionNoteTemplate, now, context);
 		} else {
 			const projectLinkLine = projectLink ? `project_link: "${projectLink}"\n` : '';
-			content = `---\nsection_name: "${sectionName}"\nsection_id: "${sectionId}"\nproject_name: "${projectName}"\nproject_id: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
+			content = `---\nsection_name: "${sectionName}"\n${p.sectionId}: "${sectionId}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
 		}
 		await this.app.vault.create(filePath, content);
 	}
@@ -800,14 +802,14 @@ export class TaskNoteRepository {
 				taskIndex.set(String(rawId), file);
 			}
 
-			// Project index: by project_id frontmatter
-			const rawProjectId = fm['project_id'];
+			// Project index: by project_id frontmatter (PropNames-aware with backward-compat dual-read)
+			const rawProjectId = fm[p.projectId] ?? (p.projectId !== 'project_id' ? fm['project_id'] : undefined);
 			if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
 				projectIndex.set(rawProjectId.trim(), file);
 			}
 
-			// Section index: by section_id frontmatter
-			const rawSectionId = fm['section_id'];
+			// Section index: by section_id frontmatter (PropNames-aware with backward-compat dual-read)
+			const rawSectionId = fm[p.sectionId] ?? (p.sectionId !== 'section_id' ? fm['section_id'] : undefined);
 			if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
 				sectionIndex.set(rawSectionId.trim(), file);
 			}

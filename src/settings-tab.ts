@@ -654,6 +654,11 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Deadline date (date type)', 'Date-typed deadline for Obsidian Bases calendar views.', 'todoistDeadlineDateTyped');
 		this.addPropNameSetting(el, 'Task created date', 'Date-typed creation date. Use in Bases to compute task age (e.g. days since created).', 'todoistCreatedDate');
 
+		new Setting(el).setName('Project & section note properties').setHeading();
+
+		this.addPropNameSetting(el, 'Project ID', 'Frontmatter key written into project notes to track the Todoist project ID.', 'projectId');
+		this.addPropNameSetting(el, 'Section ID', 'Frontmatter key written into section notes to track the Todoist section ID.', 'sectionId');
+
 		new Setting(el)
 			.setName('Reset property names to defaults')
 			.setDesc('Restore all property names to their default values.')

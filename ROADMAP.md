@@ -67,6 +67,64 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 
 ---
 
+## Tier 5 — ID Tracking System Improvements (depends on Tier 1)
+
+> Adds a stable vault UUID, unifies project/section ID keys through PropNames, detects duplicate `todoist_id` conflicts with user warnings, and prevents duplicate Todoist task creation when a sync crashes mid-flight.
+
+### PR 7: Unify project/section ID keys through PropNames
+> Prerequisite cleanup — makes `project_id` and `section_id` configurable like all other property names. Backward-compatible dual-read for existing notes.
+
+- [x] Add `projectId: string` and `sectionId: string` to `PropNames` interface in `src/settings.ts` (defaults: `'project_id'`, `'section_id'`)
+- [x] Update `buildVaultIndexes()` in `src/task-note-repository.ts` — replace hardcoded `fm['project_id']` / `fm['section_id']` reads with PropNames-aware dual-read:
+  ```ts
+  const rawProjectId = fm[p.projectId] ?? (p.projectId !== 'project_id' ? fm['project_id'] : undefined);
+  ```
+- [x] Update default content in `ensureProjectNote()` and `ensureSectionNote()` to use `${p.projectId}:` / `${p.sectionId}:` instead of hardcoded keys
+- [x] Add `addPropNameSetting()` entries for `projectId` and `sectionId` in `src/settings-tab.ts`
+
+### PR 8: Add `vault_id` UUID to all plugin notes
+> Each note gets a stable, write-once UUID at creation time. Existing notes are backfilled on first sync.
+
+- [ ] Add exported `generateUuid()` to `src/task-frontmatter.ts` (uses `crypto.randomUUID()` with a `Date.now()` fallback)
+- [ ] Add `vaultId: string` to `PropNames` in `src/settings.ts` (default: `'vault_id'`)
+- [ ] Write `vault_id` at creation time in four places: `buildNewFileContent()`, `createLocalTaskNote()`, `ensureProjectNote()`, `ensureSectionNote()`
+- [ ] Add `backfillVaultIds(): Promise<number>` method to `TaskNoteRepository` — scans vault-wide, skips notes with no plugin ID, skips notes that already have `vault_id`, writes a new UUID via `processFrontMatter`
+- [ ] Call `repository.backfillVaultIds()` in `runImportSync()` (`src/sync-service.ts`) after `repairMalformedSignatureFrontmatterLines()`
+- [ ] Add `vaultIdIndex: Map<string, TFile>` to `buildVaultIndexes()` return type
+- [ ] Add `addPropNameSetting()` for `vaultId` in `src/settings-tab.ts` with a note that this is write-once
+
+### PR 9: Detect duplicate `todoist_id` in vault
+> When two vault files share the same `todoist_id`, emit a console warning and an Obsidian Notice rather than silently resolving non-deterministically.
+
+- [ ] Extend `buildVaultIndexes()` return type with `duplicateTaskIds: Set<string>`
+- [ ] In the task index loop, replace unconditional `taskIndex.set(id, file)` with first-seen-wins collision detection that populates `duplicateTaskIds`
+- [ ] Add `emitDuplicateIdWarnings(dupes: Set<string>)` method — logs to console and shows an Obsidian `Notice` if any duplicates found; add `Notice` import from `obsidian`
+- [ ] Update `syncItems()` and `listSyncedTasks()` to destructure `duplicateTaskIds` and call `emitDuplicateIdWarnings()`
+
+### PR 10: Idempotency guard for local creates
+> Prevents a crashed sync from creating a duplicate Todoist task. A `todoist_pending_id` property is written immediately after `createTask()` returns; notes with this property are excluded from the next create pass and cleaned up when the full import syncs them back.
+
+- [ ] Add `todoistPendingId: string` to `PropNames` in `src/settings.ts` (default: `'todoist_pending_id'`)
+- [ ] Add `markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void>` to `TaskNoteRepository` — writes `todoist_pending_id` via `processFrontMatter`
+- [ ] In `runImportSync()` create loop (`src/sync-service.ts`), call `repository.markCreateDispatched(pending.file, createdTodoistId)` immediately after `createTask()` returns, before any further async work
+- [ ] In `listPendingLocalCreates()`, skip notes that already have a non-empty `todoist_pending_id` frontmatter value
+- [ ] In `markLocalCreateSynced()`, delete `data[p.todoistPendingId]` inside `processFrontMatter`
+- [ ] In `updateTaskFile()`, clear `todoist_pending_id` if present (recovery path when import catches the task before `markLocalCreateSynced` ran)
+- [ ] Add `addPropNameSetting()` for `todoistPendingId` in `src/settings-tab.ts`
+
+---
+
+## Tier 5 Verification
+
+- [ ] In a vault with existing project/section notes using `project_id`/`section_id`, sync still finds them after upgrade (backward compat dual-read)
+- [ ] Rename `projectId` prop in settings → new notes use the new key; old notes still found via dual-read
+- [ ] Run sync on a vault with existing task notes → all notes gain a `vault_id` property; running sync again does not re-write them
+- [ ] Manually give two task notes the same `todoist_id` → run sync → Obsidian Notice appears warning about the duplicate
+- [ ] Simulate crash between `createTask()` and `markLocalCreateSynced()` → note gets `todoist_pending_id` written → excluded from `listPendingLocalCreates()` on next run → recovered when full import runs
+- [ ] `npm run build` passes with no TypeScript errors
+
+---
+
 ## Verification Checklist
 
 - [ ] Move a synced task note to a different folder → sync → file found and updated (not duplicated)
@@ -88,8 +146,9 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 | File | Related Tasks |
 |------|--------------|
 | `src/task-note-repository.ts` | All tiers — primary implementation file |
-| `src/settings.ts` | PR 2, 4, 5, 6 |
-| `src/settings-tab.ts` | PR 2, 4, 5, 6 |
+| `src/settings.ts` | PR 2, 4, 5, 6, 7, 8, 9, 10 |
+| `src/settings-tab.ts` | PR 2, 4, 5, 6, 7, 8, 10 |
 | `src/todoist-client.ts` | PR 3, 6 (`parent_id`, `is_archived`) |
 | `src/import-rules.ts` | PR 4 (exclusion logic) |
-| `src/sync-service.ts` | PR 3, 4, 6 (pass new data to repository) |
+| `src/sync-service.ts` | PR 3, 4, 6, 8, 10 (pass new data to repository) |
+| `src/task-frontmatter.ts` | PR 8 (`generateUuid()`) |
