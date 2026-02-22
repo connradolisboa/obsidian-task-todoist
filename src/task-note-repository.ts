@@ -1,4 +1,4 @@
-import { App, Notice, TFile, normalizePath } from 'obsidian';
+import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
 import type { ArchiveMode, TaskTodoistSettings } from './settings';
 import type { TodoistItem } from './todoist-client';
 import {
@@ -155,10 +155,59 @@ export class TaskNoteRepository {
 		return { created, updated };
 	}
 
+	/**
+	 * If the cached project_name on an existing project note differs from the current Todoist name,
+	 * updates the frontmatter and renames the file/folder to match.
+	 */
+	private async updateProjectNoteIfRenamed(file: TFile, projectId: string, projectName: string): Promise<void> {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return;
+
+		const cachedName = typeof fm['project_name'] === 'string' ? (fm['project_name'] as string) : null;
+		if (!cachedName || cachedName === projectName) return;
+
+		// Update project_name in frontmatter
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			frontmatter['project_name'] = projectName;
+		});
+
+		const oldSanitized = sanitizeFileName(cachedName) || projectId;
+		const newSanitized = sanitizeFileName(projectName) || projectId;
+		if (oldSanitized === newSanitized) return;
+
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+
+		if (this.settings.projectNotesFolderPath?.trim()) {
+			// Rename the project note file within the dedicated folder
+			const folderPath = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
+			const newFilePath = normalizePath(`${folderPath}/${newSanitized}.md`);
+			if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+				await this.app.fileManager.renameFile(file, newFilePath);
+			}
+		} else if (this.settings.useProjectSubfolders) {
+			// Rename the project subfolder, then rename the project note file inside it
+			const oldFolderPath = normalizePath(`${resolvedFolder}/${oldSanitized}`);
+			const newFolderPath = normalizePath(`${resolvedFolder}/${newSanitized}`);
+			const oldFolder = this.app.vault.getAbstractFileByPath(oldFolderPath);
+			if (oldFolder instanceof TFolder && !this.app.vault.getAbstractFileByPath(newFolderPath)) {
+				await this.app.fileManager.renameFile(oldFolder, newFolderPath);
+				// Obsidian updates file.path in-place after folder rename
+				if (file.name !== `${newSanitized}.md`) {
+					const newFilePath = normalizePath(`${newFolderPath}/${newSanitized}.md`);
+					if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+						await this.app.fileManager.renameFile(file, newFilePath);
+					}
+				}
+			}
+		}
+	}
+
 	private async ensureProjectNote(projectId: string, projectName: string, projectIndex: Map<string, TFile>): Promise<TFile | null> {
 		// Check by ID vault-wide — finds the note even if it was renamed or moved
 		if (projectIndex.has(projectId)) {
-			return projectIndex.get(projectId)!;
+			const file = projectIndex.get(projectId)!;
+			await this.updateProjectNoteIfRenamed(file, projectId, projectName);
+			return file;
 		}
 
 		const now = new Date();
@@ -375,10 +424,11 @@ export class TaskNoteRepository {
 	}
 
 	async applyArchivedProjectsAndSections(
-		archivedProjectIds: Set<string>,
-		archivedSectionIds: Set<string>,
+		archivedProjects: { id: string; name: string }[],
+		archivedSections: { id: string; name: string; project_id: string }[],
+		projectNameById: Map<string, string>,
 	): Promise<number> {
-		if (archivedProjectIds.size === 0 && archivedSectionIds.size === 0) {
+		if (archivedProjects.length === 0 && archivedSections.length === 0) {
 			return 0;
 		}
 		let moved = 0;
@@ -389,38 +439,182 @@ export class TaskNoteRepository {
 		const resolvedSectionArchive = normalizePath(resolveTemplateVars(
 			this.settings.sectionArchiveFolderPath || this.settings.projectArchiveFolderPath || 'Projects/_archive',
 		));
+		const resolvedTasksFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
+		const resolvedTaskArchive = normalizePath(resolveTemplateVars(
+			this.settings.archiveFolderPath || 'Tasks/_archive',
+		));
 
-		for (const projectId of archivedProjectIds) {
-			const file = projectIndex.get(projectId);
+		for (const project of archivedProjects) {
+			const file = projectIndex.get(project.id);
+			if (file) {
+				const archivePrefix = `${resolvedProjectArchive}/`;
+				if (file.path !== resolvedProjectArchive && !file.path.startsWith(archivePrefix)) {
+					await this.ensureFolderExists(resolvedProjectArchive);
+					const targetPath = await this.getUniqueFilePathInFolder(resolvedProjectArchive, file.name, file.path);
+					if (targetPath !== file.path) {
+						await this.app.fileManager.renameFile(file, targetPath);
+						moved += 1;
+					}
+				}
+			}
+
+			if (this.settings.useProjectSubfolders) {
+				const sanitized = sanitizeFileName(project.name) || project.id;
+				const folderPath = normalizePath(`${resolvedTasksFolder}/${sanitized}`);
+				const taskArchivePrefix = `${resolvedTaskArchive}/`;
+				const folder = this.app.vault.getAbstractFileByPath(folderPath);
+				if (folder instanceof TFolder && folderPath !== resolvedTaskArchive && !folderPath.startsWith(taskArchivePrefix)) {
+					await this.ensureFolderExists(resolvedTaskArchive);
+					const targetFolder = normalizePath(`${resolvedTaskArchive}/${sanitized}`);
+					await this.app.fileManager.renameFile(folder, targetFolder);
+					moved += 1;
+				}
+			}
+		}
+
+		for (const section of archivedSections) {
+			const file = sectionIndex.get(section.id);
+			if (file) {
+				const archivePrefix = `${resolvedSectionArchive}/`;
+				if (file.path !== resolvedSectionArchive && !file.path.startsWith(archivePrefix)) {
+					await this.ensureFolderExists(resolvedSectionArchive);
+					const targetPath = await this.getUniqueFilePathInFolder(resolvedSectionArchive, file.name, file.path);
+					if (targetPath !== file.path) {
+						await this.app.fileManager.renameFile(file, targetPath);
+						moved += 1;
+					}
+				}
+			}
+
+			if (this.settings.useProjectSubfolders) {
+				const projectName = projectNameById.get(section.project_id) ?? section.project_id;
+				const sanitizedProject = sanitizeFileName(projectName) || section.project_id;
+				const sanitizedSection = sanitizeFileName(section.name) || section.id;
+				const folderPath = normalizePath(`${resolvedTasksFolder}/${sanitizedProject}/${sanitizedSection}`);
+				const sectionArchivePrefix = `${resolvedSectionArchive}/`;
+				const folder = this.app.vault.getAbstractFileByPath(folderPath);
+				if (folder instanceof TFolder && folderPath !== resolvedSectionArchive && !folderPath.startsWith(sectionArchivePrefix)) {
+					await this.ensureFolderExists(resolvedSectionArchive);
+					const targetFolder = normalizePath(`${resolvedSectionArchive}/${sanitizedSection}`);
+					await this.app.fileManager.renameFile(folder, targetFolder);
+					moved += 1;
+				}
+			}
+		}
+
+		return moved;
+	}
+
+	async applyUnarchivedProjectsAndSections(
+		unarchivedProjects: { id: string; name: string }[],
+		unarchivedSections: { id: string; name: string; project_id: string }[],
+		projectNameById: Map<string, string>,
+	): Promise<number> {
+		let moved = 0;
+		const { projectIndex, sectionIndex } = this.buildVaultIndexes();
+		const resolvedProjectArchive = normalizePath(resolveTemplateVars(
+			this.settings.projectArchiveFolderPath || 'Projects/_archive',
+		));
+		const resolvedSectionArchive = normalizePath(resolveTemplateVars(
+			this.settings.sectionArchiveFolderPath || this.settings.projectArchiveFolderPath || 'Projects/_archive',
+		));
+		const resolvedTasksFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
+		const resolvedTaskArchive = normalizePath(resolveTemplateVars(
+			this.settings.archiveFolderPath || 'Tasks/_archive',
+		));
+
+		// Process project unarchiving first so project folders exist when restoring sections
+		for (const project of unarchivedProjects) {
+			const file = projectIndex.get(project.id);
 			if (!file) {
 				continue;
 			}
 			const archivePrefix = `${resolvedProjectArchive}/`;
-			if (file.path === resolvedProjectArchive || file.path.startsWith(archivePrefix)) {
+			if (file.path !== resolvedProjectArchive && !file.path.startsWith(archivePrefix)) {
+				// Note is not in archive — nothing to restore
 				continue;
 			}
-			await this.ensureFolderExists(resolvedProjectArchive);
-			const targetPath = await this.getUniqueFilePathInFolder(resolvedProjectArchive, file.name, file.path);
-			if (targetPath !== file.path) {
-				await this.app.fileManager.renameFile(file, targetPath);
+
+			// Determine target note path (mirrors ensureProjectNote logic)
+			const sanitizedName = sanitizeFileName(project.name) || project.id;
+			let targetNotePath: string;
+			if (this.settings.projectNotesFolderPath?.trim()) {
+				const folder = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
+				await this.ensureFolderExists(folder);
+				targetNotePath = await this.getUniqueFilePathInFolder(folder, `${sanitizedName}.md`, file.path);
+			} else if (this.settings.useProjectSubfolders) {
+				const folder = normalizePath(`${resolvedTasksFolder}/${sanitizedName}`);
+				await this.ensureFolderExists(folder);
+				targetNotePath = await this.getUniqueFilePathInFolder(folder, `${sanitizedName}.md`, file.path);
+			} else {
+				continue; // No sensible restore path
+			}
+
+			if (targetNotePath !== file.path) {
+				await this.app.fileManager.renameFile(file, targetNotePath);
 				moved += 1;
+			}
+
+			// Restore task subfolder using archived note's stem (the old sanitized name)
+			if (this.settings.useProjectSubfolders) {
+				const oldStem = file.basename; // filename without extension, as it was archived
+				const archivedFolderPath = normalizePath(`${resolvedTaskArchive}/${oldStem}`);
+				const archivedFolder = this.app.vault.getAbstractFileByPath(archivedFolderPath);
+				if (archivedFolder instanceof TFolder) {
+					const targetFolder = normalizePath(`${resolvedTasksFolder}/${sanitizedName}`);
+					if (archivedFolderPath !== targetFolder) {
+						await this.app.fileManager.renameFile(archivedFolder, targetFolder);
+						moved += 1;
+					}
+				}
 			}
 		}
 
-		for (const sectionId of archivedSectionIds) {
-			const file = sectionIndex.get(sectionId);
+		for (const section of unarchivedSections) {
+			const file = sectionIndex.get(section.id);
 			if (!file) {
 				continue;
 			}
 			const archivePrefix = `${resolvedSectionArchive}/`;
-			if (file.path === resolvedSectionArchive || file.path.startsWith(archivePrefix)) {
+			if (file.path !== resolvedSectionArchive && !file.path.startsWith(archivePrefix)) {
 				continue;
 			}
-			await this.ensureFolderExists(resolvedSectionArchive);
-			const targetPath = await this.getUniqueFilePathInFolder(resolvedSectionArchive, file.name, file.path);
-			if (targetPath !== file.path) {
-				await this.app.fileManager.renameFile(file, targetPath);
+
+			const projectName = projectNameById.get(section.project_id) ?? section.project_id;
+			const sanitizedProject = sanitizeFileName(projectName) || section.project_id;
+			const sanitizedSection = sanitizeFileName(section.name) || section.id;
+
+			// Determine target section note path (mirrors ensureProjectNote for sections)
+			let targetNotePath: string;
+			if (this.settings.sectionNotesFolderPath?.trim()) {
+				const folder = normalizePath(resolveTemplateVars(this.settings.sectionNotesFolderPath));
+				await this.ensureFolderExists(folder);
+				targetNotePath = await this.getUniqueFilePathInFolder(folder, `${sanitizedSection}.md`, file.path);
+			} else if (this.settings.useProjectSubfolders) {
+				const folder = normalizePath(`${resolvedTasksFolder}/${sanitizedProject}/${sanitizedSection}`);
+				await this.ensureFolderExists(folder);
+				targetNotePath = await this.getUniqueFilePathInFolder(folder, `${sanitizedSection}.md`, file.path);
+			} else {
+				continue;
+			}
+
+			if (targetNotePath !== file.path) {
+				await this.app.fileManager.renameFile(file, targetNotePath);
 				moved += 1;
+			}
+
+			// Restore section subfolder
+			if (this.settings.useProjectSubfolders) {
+				const oldStem = file.basename;
+				const archivedFolderPath = normalizePath(`${resolvedSectionArchive}/${oldStem}`);
+				const archivedFolder = this.app.vault.getAbstractFileByPath(archivedFolderPath);
+				if (archivedFolder instanceof TFolder) {
+					const targetFolder = normalizePath(`${resolvedTasksFolder}/${sanitizedProject}/${sanitizedSection}`);
+					if (archivedFolderPath !== targetFolder) {
+						await this.app.fileManager.renameFile(archivedFolder, targetFolder);
+						moved += 1;
+					}
+				}
 			}
 		}
 
@@ -444,8 +638,12 @@ export class TaskNoteRepository {
 			}
 
 			const todoistSync = frontmatter[p.todoistSync];
-			const todoistId = frontmatter[p.todoistId];
-			if (!isTruthy(todoistSync) || (typeof todoistId === 'string' && todoistId.trim())) {
+			const rawTodoistId = frontmatter[p.todoistId];
+			const todoistId =
+				typeof rawTodoistId === 'string' ? rawTodoistId.trim() :
+				typeof rawTodoistId === 'number' ? String(rawTodoistId) :
+				'';
+			if (!isTruthy(todoistSync) || todoistId) {
 				continue;
 			}
 
@@ -669,13 +867,12 @@ export class TaskNoteRepository {
 			return { created: 0, updated: 0, file };
 		}
 
-		// Conflict resolution: if the file has local unsent changes and local-wins is set, skip remote update.
+		// Conflict resolution: if the file has local unsent changes and local-wins is set,
+		// skip user-editable fields but still write project/section metadata from Todoist.
 		const syncStatus = typeof cachedFrontmatter?.[p.todoistSyncStatus] === 'string'
 			? cachedFrontmatter[p.todoistSyncStatus] as string
 			: '';
-		if (syncStatus === 'dirty_local' && this.settings.conflictResolution === 'local-wins') {
-			return { created: 0, updated: 0, file };
-		}
+		const localWins = syncStatus === 'dirty_local' && this.settings.conflictResolution === 'local-wins';
 
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
 		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
@@ -692,9 +889,8 @@ export class TaskNoteRepository {
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
-			touchModifiedDate(data, this.settings);
-			setTaskTitle(data, item.content, this.settings);
-			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
+
+			// Always write project/section metadata — these come from Todoist, not local edits.
 			data[p.todoistSync] = true;
 			data[p.todoistId] = item.id;
 			data[p.todoistProjectId] = item.project_id;
@@ -703,6 +899,27 @@ export class TaskNoteRepository {
 			data[p.todoistSectionName] = sectionName;
 			data[p.todoistProjectLink] = projectLink;
 			data[p.todoistSectionLink] = sectionLink;
+			data[p.todoistLabels] = item.labels ?? [];
+			data[p.todoistParentId] = item.parent_id ?? '';
+			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
+			// Clear any pending ID guard — recovery path when import catches the task
+			// before markLocalCreateSynced() ran after a crashed sync.
+			if (p.todoistPendingId in data) {
+				delete data[p.todoistPendingId];
+			}
+			data[p.todoistLastImportedAt] = new Date().toISOString();
+
+			if (localWins) {
+				// Local wins: preserve user-editable fields (title, status, description, priority, due).
+				// Update the import signature so this partial metadata write is not re-applied every sync.
+				data[p.todoistLastImportedSignature] = remoteImportSignature;
+				return;
+			}
+
+			// Remote wins (or no local changes): apply all remote fields.
+			touchModifiedDate(data, this.settings);
+			setTaskTitle(data, item.content, this.settings);
+			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
 			data[p.todoistPriority] = priority;
 			data[p.todoistPriorityLabel] = priorityLabel(priority);
 			data[p.todoistDue] = dueDate;
@@ -710,7 +927,6 @@ export class TaskNoteRepository {
 			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
 			data[p.todoistDeadline] = deadlineDate || null;
 			data[p.todoistDescription] = item.description?.trim() ?? '';
-			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
 			data[p.todoistLastImportedSignature] = remoteImportSignature;
 			data[p.todoistLastSyncedSignature] = buildTodoistSyncSignature({
 				title: item.content,
@@ -722,18 +938,10 @@ export class TaskNoteRepository {
 				dueDate,
 				dueString: item.due?.string ?? '',
 			});
-			data[p.todoistLabels] = item.labels ?? [];
-			data[p.todoistParentId] = item.parent_id ?? '';
 			data[p.todoistSyncStatus] = 'synced';
 			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
-			// Clear any pending ID guard — recovery path when import catches the task
-		// before markLocalCreateSynced() ran after a crashed sync.
-		if (p.todoistPendingId in data) {
-			delete data[p.todoistPendingId];
-		}
-		data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
 
 		// Note: body content is intentionally NOT updated from Todoist description.

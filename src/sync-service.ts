@@ -138,9 +138,12 @@ export class SyncService {
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById);
 			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries, this.settings.archiveMode);
 
-			const archivedProjectIds = new Set(snapshot.projects.filter((p) => p.is_archived).map((p) => p.id));
-			const archivedSectionIds = new Set(snapshot.sections.filter((s) => s.is_archived).map((s) => s.id));
-			await repository.applyArchivedProjectsAndSections(archivedProjectIds, archivedSectionIds);
+			const archivedProjects = snapshot.projects.filter((p) => p.is_archived);
+			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
+			const unarchivedProjects = snapshot.projects.filter((p) => !p.is_archived);
+			const unarchivedSections = snapshot.sections.filter((s) => !s.is_archived);
+			await repository.applyArchivedProjectsAndSections(archivedProjects, archivedSections, projectNameById);
+			await repository.applyUnarchivedProjectsAndSections(unarchivedProjects, unarchivedSections, projectNameById);
 
 			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
 
