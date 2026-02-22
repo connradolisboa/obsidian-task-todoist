@@ -228,6 +228,38 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+
+		new Setting(el).setName('Exclusion rules').setHeading();
+
+		new Setting(el)
+			.setName('Excluded project names')
+			.setDesc('Comma-separated project names to skip during import. Tasks in these projects are never imported.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Archive, Templates')
+					.setValue(this.plugin.settings.excludedProjectNames)
+					.onChange(async (value) => {
+						this.plugin.settings.excludedProjectNames = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 2;
+				textArea.inputEl.cols = 36;
+			});
+
+		new Setting(el)
+			.setName('Excluded section names')
+			.setDesc('Comma-separated section names to skip during import. Tasks in these sections are never imported.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Archive, Backlog')
+					.setValue(this.plugin.settings.excludedSectionNames)
+					.onChange(async (value) => {
+						this.plugin.settings.excludedSectionNames = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 2;
+				textArea.inputEl.cols = 36;
+			});
 	}
 
 	// ── Sync ───────────────────────────────────────────────────────────────────
@@ -492,6 +524,42 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 						.setValue(this.plugin.settings.sectionNoteTemplate)
 						.onChange(async (value) => {
 							this.plugin.settings.sectionNoteTemplate = value;
+							await this.plugin.saveSettings();
+						});
+					textArea.inputEl.rows = 6;
+					textArea.inputEl.cols = 50;
+					textArea.inputEl.style.fontFamily = 'monospace';
+				});
+		}
+
+		new Setting(el).setName('Area projects').setHeading();
+
+		new Setting(el)
+			.setName('Area project names')
+			.setDesc('Comma-separated project names treated as "areas". These use the area note template instead of the standard project note template.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Work, Personal')
+					.setValue(this.plugin.settings.areaProjectNames)
+					.onChange(async (value) => {
+						this.plugin.settings.areaProjectNames = value;
+						await this.plugin.saveSettings();
+						this.display();
+					});
+				textArea.inputEl.rows = 2;
+				textArea.inputEl.cols = 36;
+			});
+
+		if (this.plugin.settings.areaProjectNames.trim()) {
+			new Setting(el)
+				.setName('Area project note template')
+				.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+				.addTextArea((textArea) => {
+					textArea
+						.setPlaceholder('Leave empty to use default project note layout.')
+						.setValue(this.plugin.settings.areaProjectNoteTemplate)
+						.onChange(async (value) => {
+							this.plugin.settings.areaProjectNoteTemplate = value;
 							await this.plugin.saveSettings();
 						});
 					textArea.inputEl.rows = 6;

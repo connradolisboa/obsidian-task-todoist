@@ -183,8 +183,12 @@ export class TaskNoteRepository {
 		}
 
 		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId };
+		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
+		const isArea = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
 		let content: string;
-		if (this.settings.projectNoteTemplate?.trim()) {
+		if (isArea && this.settings.areaProjectNoteTemplate?.trim()) {
+			content = resolveTemplateVars(this.settings.areaProjectNoteTemplate, now, context);
+		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
 		} else {
 			content = `---\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
@@ -1095,6 +1099,15 @@ function repairSignatureFrontmatterInContent(
 		return content;
 	}
 	return content.replace(originalFrontmatter, fixedFrontmatter);
+}
+
+function parseCommaSeparatedNameSet(rawValue: string): Set<string> {
+	return new Set(
+		(rawValue ?? '')
+			.split(',')
+			.map((name) => name.trim().toLowerCase())
+			.filter(Boolean),
+	);
 }
 
 function isValidSignatureFrontmatterLine(line: string, key: string): boolean {

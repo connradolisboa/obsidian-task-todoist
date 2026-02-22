@@ -6,13 +6,16 @@ export function filterImportableItems(
 	projects: TodoistProject[],
 	settings: TaskTodoistSettings,
 	userId: string | null,
+	sectionNameById: Map<string, string> = new Map(),
 ): TodoistItem[] {
 	if (!settings.autoImportEnabled) {
 		return [];
 	}
 
 	const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
-	const allowedProjectNames = parseAllowedProjectNames(settings.autoImportAllowedProjectNames);
+	const allowedProjectNames = parseNameSet(settings.autoImportAllowedProjectNames);
+	const excludedProjectNames = parseNameSet(settings.excludedProjectNames);
+	const excludedSectionNames = parseNameSet(settings.excludedSectionNames);
 	const requiredLabel = settings.autoImportRequiredLabel.trim().toLowerCase();
 
 	return items.filter((item) => {
@@ -24,9 +27,21 @@ export function filterImportableItems(
 			return false;
 		}
 
+		const projectName = projectNameById.get(item.project_id)?.toLowerCase();
+
 		if (settings.autoImportProjectScope === 'allow-list-by-name' && allowedProjectNames.size > 0) {
-			const projectName = projectNameById.get(item.project_id)?.toLowerCase();
 			if (!projectName || !allowedProjectNames.has(projectName)) {
+				return false;
+			}
+		}
+
+		if (excludedProjectNames.size > 0 && projectName && excludedProjectNames.has(projectName)) {
+			return false;
+		}
+
+		if (excludedSectionNames.size > 0 && item.section_id) {
+			const sectionName = sectionNameById.get(item.section_id)?.toLowerCase();
+			if (sectionName && excludedSectionNames.has(sectionName)) {
 				return false;
 			}
 		}
@@ -42,9 +57,9 @@ export function filterImportableItems(
 	});
 }
 
-function parseAllowedProjectNames(rawValue: string): Set<string> {
+function parseNameSet(rawValue: string): Set<string> {
 	return new Set(
-		rawValue
+		(rawValue ?? '')
 			.split(',')
 			.map((name) => name.trim().toLowerCase())
 			.filter(Boolean),

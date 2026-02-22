@@ -38,12 +38,12 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 
 ### PR 4: Exclusion lists + area project templates
 
-- [ ] **Exclude projects from sync** — add `excludedProjectNames: string` setting (comma-separated); filter in `src/import-rules.ts`
-- [ ] **Exclude sections from sync** — add `excludedSectionNames: string` setting; filter in `src/import-rules.ts` (requires passing `sectionNameById` to `filterImportableItems()`)
-- [ ] **Area project names** — add `areaProjectNames: string` setting (comma-separated list of projects treated as "areas")
-- [ ] **Area project template** — add `areaProjectNoteTemplate: string` setting; use it in `ensureProjectNote()` when the project name matches the area list
-- [ ] Add all four settings to `src/settings.ts` and `DEFAULT_SETTINGS`
-- [ ] Add UI blocks in `src/settings-tab.ts` (Import tab for exclusions, Notes tab for area template)
+- [x] **Exclude projects from sync** — add `excludedProjectNames: string` setting (comma-separated); filter in `src/import-rules.ts`
+- [x] **Exclude sections from sync** — add `excludedSectionNames: string` setting; filter in `src/import-rules.ts` (requires passing `sectionNameById` to `filterImportableItems()`)
+- [x] **Area project names** — add `areaProjectNames: string` setting (comma-separated list of projects treated as "areas")
+- [x] **Area project template** — add `areaProjectNoteTemplate: string` setting; use it in `ensureProjectNote()` when the project name matches the area list
+- [x] Add all four settings to `src/settings.ts` and `DEFAULT_SETTINGS`
+- [x] Add UI blocks in `src/settings-tab.ts` (Import tab for exclusions, Notes tab for area template)
 
 ---
 
@@ -74,9 +74,9 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 - [ ] Change task title in Todoist → sync → file NOT renamed, `task_title` frontmatter updated
 - [x] Section note created → has `project_link` pointing to correct project note path
 - [x] Sub-project note created → has `parent_project_link` pointing to parent project note
-- [ ] Project in excluded list → its tasks not imported on sync
-- [ ] Section name in excluded list → tasks in that section not imported
-- [ ] Project in area list → project note uses area template
+- [x] Project in excluded list → its tasks not imported on sync
+- [x] Section name in excluded list → tasks in that section not imported
+- [x] Project in area list → project note uses area template
 - [ ] Archive mode = "Move to Obsidian trash" → deleted Todoist task → note appears in `.trash`
 - [ ] Archive project in Todoist → sync → project note moves to `projectArchiveFolderPath`
 - [ ] `npm run build` passes with no TypeScript errors

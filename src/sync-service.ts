@@ -102,16 +102,17 @@ export class SyncService {
 			snapshot = await todoistClient.fetchSyncSnapshot();
 			const activeItemById = new Map(snapshot.items.map((item) => [item.id, item]));
 
+			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
 			const importableItems = filterImportableItems(
 				snapshot.items,
 				snapshot.projects,
 				this.settings,
 				snapshot.userId,
+				sectionNameById,
 			);
 			const importableWithAncestors = includeAncestorTasks(importableItems, snapshot.items);
 
 			const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
-			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
 			const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
 
 			const existingSyncedTasks = await repository.listSyncedTasks();

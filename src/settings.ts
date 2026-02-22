@@ -114,6 +114,10 @@ export interface TaskTodoistSettings {
 	createSectionNotes: boolean;
 	sectionNotesFolderPath: string;
 	sectionNoteTemplate: string;
+	excludedProjectNames: string;
+	excludedSectionNames: string;
+	areaProjectNames: string;
+	areaProjectNoteTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -144,4 +148,8 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	createSectionNotes: false,
 	sectionNotesFolderPath: '',
 	sectionNoteTemplate: '',
+	excludedProjectNames: '',
+	excludedSectionNames: '',
+	areaProjectNames: '',
+	areaProjectNoteTemplate: '',
 };
