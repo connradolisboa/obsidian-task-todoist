@@ -21,6 +21,10 @@ export function registerInlineTaskConverter(plugin: TaskTodoistPlugin): void {
 				return;
 			}
 
+			if (!plugin.settings.showConvertButton) {
+				return;
+			}
+
 			const taskText = extractTaskText(listItem);
 			if (!taskText) {
 				return;

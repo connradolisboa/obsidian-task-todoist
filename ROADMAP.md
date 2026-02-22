@@ -96,21 +96,21 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 ### PR 9: Detect duplicate `todoist_id` in vault
 > When two vault files share the same `todoist_id`, emit a console warning and an Obsidian Notice rather than silently resolving non-deterministically.
 
-- [ ] Extend `buildVaultIndexes()` return type with `duplicateTaskIds: Set<string>`
-- [ ] In the task index loop, replace unconditional `taskIndex.set(id, file)` with first-seen-wins collision detection that populates `duplicateTaskIds`
-- [ ] Add `emitDuplicateIdWarnings(dupes: Set<string>)` method — logs to console and shows an Obsidian `Notice` if any duplicates found; add `Notice` import from `obsidian`
-- [ ] Update `syncItems()` and `listSyncedTasks()` to destructure `duplicateTaskIds` and call `emitDuplicateIdWarnings()`
+- [x] Extend `buildVaultIndexes()` return type with `duplicateTaskIds: Set<string>`
+- [x] In the task index loop, replace unconditional `taskIndex.set(id, file)` with first-seen-wins collision detection that populates `duplicateTaskIds`
+- [x] Add `emitDuplicateIdWarnings(dupes: Set<string>)` method — logs to console and shows an Obsidian `Notice` if any duplicates found; add `Notice` import from `obsidian`
+- [x] Update `syncItems()` and `listSyncedTasks()` to destructure `duplicateTaskIds` and call `emitDuplicateIdWarnings()`
 
 ### PR 10: Idempotency guard for local creates
 > Prevents a crashed sync from creating a duplicate Todoist task. A `todoist_pending_id` property is written immediately after `createTask()` returns; notes with this property are excluded from the next create pass and cleaned up when the full import syncs them back.
 
-- [ ] Add `todoistPendingId: string` to `PropNames` in `src/settings.ts` (default: `'todoist_pending_id'`)
-- [ ] Add `markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void>` to `TaskNoteRepository` — writes `todoist_pending_id` via `processFrontMatter`
-- [ ] In `runImportSync()` create loop (`src/sync-service.ts`), call `repository.markCreateDispatched(pending.file, createdTodoistId)` immediately after `createTask()` returns, before any further async work
-- [ ] In `listPendingLocalCreates()`, skip notes that already have a non-empty `todoist_pending_id` frontmatter value
-- [ ] In `markLocalCreateSynced()`, delete `data[p.todoistPendingId]` inside `processFrontMatter`
-- [ ] In `updateTaskFile()`, clear `todoist_pending_id` if present (recovery path when import catches the task before `markLocalCreateSynced` ran)
-- [ ] Add `addPropNameSetting()` for `todoistPendingId` in `src/settings-tab.ts`
+- [x] Add `todoistPendingId: string` to `PropNames` in `src/settings.ts` (default: `'todoist_pending_id'`)
+- [x] Add `markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void>` to `TaskNoteRepository` — writes `todoist_pending_id` via `processFrontMatter`
+- [x] In `runImportSync()` create loop (`src/sync-service.ts`), call `repository.markCreateDispatched(pending.file, createdTodoistId)` immediately after `createTask()` returns, before any further async work
+- [x] In `listPendingLocalCreates()`, skip notes that already have a non-empty `todoist_pending_id` frontmatter value
+- [x] In `markLocalCreateSynced()`, delete `data[p.todoistPendingId]` inside `processFrontMatter`
+- [x] In `updateTaskFile()`, clear `todoist_pending_id` if present (recovery path when import catches the task before `markLocalCreateSynced` ran)
+- [x] Add `addPropNameSetting()` for `todoistPendingId` in `src/settings-tab.ts`
 
 ---
 
@@ -121,7 +121,7 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 - [ ] Run sync on a vault with existing task notes → all notes gain a `vault_id` property; running sync again does not re-write them
 - [ ] Manually give two task notes the same `todoist_id` → run sync → Obsidian Notice appears warning about the duplicate
 - [ ] Simulate crash between `createTask()` and `markLocalCreateSynced()` → note gets `todoist_pending_id` written → excluded from `listPendingLocalCreates()` on next run → recovered when full import runs
-- [ ] `npm run build` passes with no TypeScript errors
+- [x] `npm run build` passes with no TypeScript errors
 
 ---
 

@@ -58,6 +58,9 @@ export class SyncService {
 					dueDate,
 					dueString,
 				});
+				// Write the pending ID immediately so a crash before markLocalCreateSynced()
+				// does not cause a duplicate task on the next sync run.
+				await repository.markCreateDispatched(pending.file, createdTodoistId);
 				if (pending.isDone) {
 					await todoistClient.updateTask({
 						id: createdTodoistId,

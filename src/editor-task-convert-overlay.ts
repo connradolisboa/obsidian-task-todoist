@@ -62,7 +62,7 @@ function buildDecorations(view: EditorView, plugin: TaskTodoistPlugin): Decorati
 						}),
 					);
 				}
-			} else {
+			} else if (plugin.settings.showConvertButton) {
 				const uncheckedMatch = line.text.match(UNCHECKED_TASK_LINE_REGEX);
 				if (uncheckedMatch) {
 					const title = normalizeTaskText(uncheckedMatch[2] ?? '');

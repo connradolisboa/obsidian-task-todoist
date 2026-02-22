@@ -151,6 +151,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		new Setting(el).setName('Task tools').setHeading();
 
 		new Setting(el)
+			.setName('Show convert button')
+			.setDesc('Show the ↗ button next to unchecked checklist items to convert them to task notes.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.showConvertButton).onChange(async (value) => {
+					this.plugin.settings.showConvertButton = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(el)
 			.setName('Create task note')
 			.setDesc('Open a modal to create a new task note in your task folder.')
 			.addButton((button) => {
@@ -662,6 +672,10 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		new Setting(el).setName('Vault identity').setHeading();
 
 		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
+
+		new Setting(el).setName('Idempotency').setHeading();
+
+		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
 
 		new Setting(el)
 			.setName('Reset property names to defaults')

@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath } from 'obsidian';
+import { App, Notice, TFile, normalizePath } from 'obsidian';
 import type { ArchiveMode, TaskTodoistSettings } from './settings';
 import type { TodoistItem } from './todoist-client';
 import {
@@ -90,7 +90,8 @@ export class TaskNoteRepository {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		await this.ensureFolderExists(resolvedFolder);
 
-		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex } = this.buildVaultIndexes();
+		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex, duplicateTaskIds } = this.buildVaultIndexes();
+		this.emitDuplicateIdWarnings(duplicateTaskIds);
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
 		const pendingParents: ParentAssignment[] = [];
 		const seenProjectIds = new Set<string>();
@@ -270,7 +271,8 @@ export class TaskNoteRepository {
 	}
 
 	async listSyncedTasks(): Promise<SyncedTaskEntry[]> {
-		const { taskIndex } = this.buildVaultIndexes();
+		const { taskIndex, duplicateTaskIds } = this.buildVaultIndexes();
+		this.emitDuplicateIdWarnings(duplicateTaskIds);
 		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
@@ -419,6 +421,14 @@ export class TaskNoteRepository {
 				continue;
 			}
 
+			// Skip notes that already have a pending Todoist ID — a previous create was dispatched
+			// but the sync crashed before markLocalCreateSynced() ran. Exclude them from another
+			// create attempt; they will be recovered when the full import syncs them back.
+			const pendingId = frontmatter[p.todoistPendingId];
+			if (typeof pendingId === 'string' && pendingId.trim()) {
+				continue;
+			}
+
 			const title = getTaskTitle(frontmatter, this.settings, file.basename).trim();
 			if (!title) {
 				continue;
@@ -477,7 +487,16 @@ export class TaskNoteRepository {
 			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
+			// Clear the pending ID guard now that the create is confirmed
+			delete data[p.todoistPendingId];
 			data[p.todoistLastImportedAt] = new Date().toISOString();
+		});
+	}
+
+	async markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void> {
+		const p = getPropNames(this.settings);
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			(frontmatter as Record<string, unknown>)[p.todoistPendingId] = pendingTodoistId;
 		});
 	}
 
@@ -675,7 +694,12 @@ export class TaskNoteRepository {
 			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
 				delete data.sync_status;
 			}
-			data[p.todoistLastImportedAt] = new Date().toISOString();
+			// Clear any pending ID guard — recovery path when import catches the task
+		// before markLocalCreateSynced() ran after a crashed sync.
+		if (p.todoistPendingId in data) {
+			delete data[p.todoistPendingId];
+		}
+		data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
 
 		// Note: body content is intentionally NOT updated from Todoist description.
@@ -784,11 +808,13 @@ export class TaskNoteRepository {
 		projectIndex: Map<string, TFile>;
 		sectionIndex: Map<string, TFile>;
 		vaultIdIndex: Map<string, TFile>;
+		duplicateTaskIds: Set<string>;
 	} {
 		const taskIndex = new Map<string, TFile>();
 		const projectIndex = new Map<string, TFile>();
 		const sectionIndex = new Map<string, TFile>();
 		const vaultIdIndex = new Map<string, TFile>();
+		const duplicateTaskIds = new Set<string>();
 		const p = getPropNames(this.settings);
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -799,10 +825,18 @@ export class TaskNoteRepository {
 
 			// Task index: by todoist_id (vault-wide, not restricted to tasksFolderPath)
 			const rawId = fm[p.todoistId];
+			let taskId: string | null = null;
 			if (typeof rawId === 'string' && rawId.trim()) {
-				taskIndex.set(rawId.trim(), file);
+				taskId = rawId.trim();
 			} else if (typeof rawId === 'number') {
-				taskIndex.set(String(rawId), file);
+				taskId = String(rawId);
+			}
+			if (taskId) {
+				if (taskIndex.has(taskId)) {
+					duplicateTaskIds.add(taskId);
+				} else {
+					taskIndex.set(taskId, file);
+				}
 			}
 
 			// Project index: by project_id frontmatter (PropNames-aware with backward-compat dual-read)
@@ -824,7 +858,7 @@ export class TaskNoteRepository {
 			}
 		}
 
-		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex };
+		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskIds };
 	}
 
 	async backfillVaultIds(): Promise<number> {
@@ -859,6 +893,18 @@ export class TaskNoteRepository {
 			backfilled += 1;
 		}
 		return backfilled;
+	}
+
+	private emitDuplicateIdWarnings(dupes: Set<string>): void {
+		if (dupes.size === 0) {
+			return;
+		}
+		const ids = Array.from(dupes).join(', ');
+		console.warn(`[obsidian-task-todoist] Duplicate todoist_id values detected in vault: ${ids}`);
+		new Notice(
+			`Task Todoist: ${dupes.size} duplicate todoist_id(s) found in vault. Check console for details.`,
+			8000,
+		);
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {

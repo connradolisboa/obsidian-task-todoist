@@ -50,6 +50,8 @@ export interface PropNames {
 	sectionId: string;
 	// Stable write-once vault UUID
 	vaultId: string;
+	// Idempotency guard for in-flight local creates
+	todoistPendingId: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -91,6 +93,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	projectId: 'project_id',
 	sectionId: 'section_id',
 	vaultId: 'vault_id',
+	todoistPendingId: 'todoist_pending_id',
 };
 
 export interface TaskTodoistSettings {
@@ -116,6 +119,7 @@ export interface TaskTodoistSettings {
 	conflictResolution: ConflictResolution;
 	noteTemplate: string;
 	autoOpenNewNote: boolean;
+	showConvertButton: boolean;
 	createProjectNotes: boolean;
 	projectNotesFolderPath: string;
 	projectNoteTemplate: string;
@@ -152,6 +156,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	conflictResolution: 'local-wins',
 	noteTemplate: '',
 	autoOpenNewNote: false,
+	showConvertButton: true,
 	createProjectNotes: false,
 	projectNotesFolderPath: '',
 	projectNoteTemplate: '',
