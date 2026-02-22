@@ -112,6 +112,7 @@ export class SyncService {
 
 			const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
 			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
+			const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
 
 			const existingSyncedTasks = await repository.listSyncedTasks();
 
@@ -126,6 +127,7 @@ export class SyncService {
 			const taskResult = await repository.syncItems(Array.from(itemsToUpsertById.values()), {
 				projectNameById,
 				sectionNameById,
+				projectParentIdById,
 			});
 
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById);

@@ -40,6 +40,7 @@ export interface TaskTemplateContext {
 export interface ProjectTemplateContext {
 	project_name: string;
 	project_id: string;
+	parent_project_link?: string;
 }
 
 export interface SectionTemplateContext {
@@ -47,6 +48,7 @@ export interface SectionTemplateContext {
 	section_id: string;
 	project_name: string;
 	project_id: string;
+	project_link?: string;
 }
 
 export function resolveTemplateVars(template: string, date?: Date): string;
@@ -109,7 +111,8 @@ export function resolveTemplateVars(
 			.replace(/\{\{section_name\}\}/g, sc.section_name ?? '')
 			.replace(/\{\{section_id\}\}/g, sc.section_id ?? '')
 			.replace(/\{\{project_name\}\}/g, sc.project_name ?? '')
-			.replace(/\{\{project_id\}\}/g, sc.project_id ?? '');
+			.replace(/\{\{project_id\}\}/g, sc.project_id ?? '')
+			.replace(/\{\{project_link\}\}/g, sc.project_link ?? '');
 		return result;
 	}
 
@@ -118,7 +121,8 @@ export function resolveTemplateVars(
 		const pc = context as ProjectTemplateContext;
 		result = result
 			.replace(/\{\{project_name\}\}/g, pc.project_name ?? '')
-			.replace(/\{\{project_id\}\}/g, pc.project_id ?? '');
+			.replace(/\{\{project_id\}\}/g, pc.project_id ?? '')
+			.replace(/\{\{parent_project_link\}\}/g, pc.parent_project_link ?? '');
 		return result;
 	}
 

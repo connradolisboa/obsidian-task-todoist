@@ -29,6 +29,7 @@ export interface TodoistItem {
 export interface TodoistProject {
 	id: string;
 	name: string;
+	parent_id: string | null;
 }
 
 export interface TodoistSection {
@@ -334,7 +335,7 @@ function normalizeProjects(rawProjects: Array<Record<string, unknown>>): Todoist
 			if (!id || !name) {
 				return null;
 			}
-			return { id, name };
+			return { id, name, parent_id: toOptionalId(raw.parent_id) };
 		})
 		.filter((project): project is TodoistProject => Boolean(project));
 }

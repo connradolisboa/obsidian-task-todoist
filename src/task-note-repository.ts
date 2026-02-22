@@ -20,6 +20,7 @@ import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } f
 interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
 	sectionNameById: Map<string, string>;
+	projectParentIdById?: Map<string, string | null>;
 }
 
 interface UpsertResult {
@@ -88,11 +89,13 @@ export class TaskNoteRepository {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		await this.ensureFolderExists(resolvedFolder);
 
-		const existingByTodoistId = await this.buildTodoistIdIndexInTaskFolder();
+		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex } = this.buildVaultIndexes();
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
 		const pendingParents: ParentAssignment[] = [];
 		const seenProjectIds = new Set<string>();
 		const seenSectionIds = new Set<string>();
+		// Tracks all known project files (existing + newly created) for link resolution
+		const projectFileById = new Map<string, TFile>(projectIndex);
 
 		let created = 0;
 		let updated = 0;
@@ -102,13 +105,17 @@ export class TaskNoteRepository {
 			if (this.settings.createProjectNotes && !seenProjectIds.has(item.project_id)) {
 				seenProjectIds.add(item.project_id);
 				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-				await this.ensureProjectNote(item.project_id, projectName);
+				const projectFile = await this.ensureProjectNote(item.project_id, projectName, projectIndex);
+				if (projectFile) {
+					projectFileById.set(item.project_id, projectFile);
+				}
 			}
 			if (this.settings.createSectionNotes && this.settings.useProjectSubfolders && item.section_id && !seenSectionIds.has(item.section_id)) {
 				seenSectionIds.add(item.section_id);
 				const sectionName = maps.sectionNameById.get(item.section_id) ?? 'Unknown';
 				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-				await this.ensureSectionNote(item.section_id, sectionName, item.project_id, projectName);
+				const projectFile = projectFileById.get(item.project_id) ?? null;
+				await this.ensureSectionNote(item.section_id, sectionName, item.project_id, projectName, sectionIndex, projectFile);
 			}
 
 			const existingFile = existingByTodoistId.get(item.id);
@@ -136,10 +143,19 @@ export class TaskNoteRepository {
 		await this.applyParentLinks(combinedIndex, pendingParents);
 		await this.applyChildMetadata(combinedIndex, pendingParents);
 
+		if (this.settings.createProjectNotes && maps.projectParentIdById) {
+			await this.applyParentProjectLinks(projectFileById, maps.projectParentIdById);
+		}
+
 		return { created, updated };
 	}
 
-	private async ensureProjectNote(projectId: string, projectName: string): Promise<void> {
+	private async ensureProjectNote(projectId: string, projectName: string, projectIndex: Map<string, TFile>): Promise<TFile | null> {
+		// Check by ID vault-wide — finds the note even if it was renamed or moved
+		if (projectIndex.has(projectId)) {
+			return projectIndex.get(projectId)!;
+		}
+
 		const now = new Date();
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
@@ -153,13 +169,17 @@ export class TaskNoteRepository {
 			folderPath = normalizePath(`${resolvedFolder}/${sanitizedProject}`);
 			fileName = `${sanitizedProject}.md`;
 		} else {
-			return; // No sensible path without project subfolders
+			return null; // No sensible path without project subfolders
 		}
 
 		await this.ensureFolderExists(folderPath);
 		const filePath = normalizePath(`${folderPath}/${fileName}`);
-		if (this.app.vault.getAbstractFileByPath(filePath)) {
-			return; // Already exists
+		const existingAbstract = this.app.vault.getAbstractFileByPath(filePath);
+		if (existingAbstract instanceof TFile) {
+			return existingAbstract; // Path-based guard for race conditions
+		}
+		if (existingAbstract) {
+			return null;
 		}
 
 		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId };
@@ -169,10 +189,17 @@ export class TaskNoteRepository {
 		} else {
 			content = `---\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
 		}
-		await this.app.vault.create(filePath, content);
+		const file = await this.app.vault.create(filePath, content);
+		projectIndex.set(projectId, file);
+		return file;
 	}
 
-	private async ensureSectionNote(sectionId: string, sectionName: string, projectId: string, projectName: string): Promise<void> {
+	private async ensureSectionNote(sectionId: string, sectionName: string, projectId: string, projectName: string, sectionIndex: Map<string, TFile>, projectFile: TFile | null): Promise<void> {
+		// Check by ID vault-wide — finds the note even if it was renamed or moved
+		if (sectionIndex.has(sectionId)) {
+			return;
+		}
+
 		const now = new Date();
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
@@ -191,20 +218,23 @@ export class TaskNoteRepository {
 		await this.ensureFolderExists(folderPath);
 		const filePath = normalizePath(`${folderPath}/${fileName}`);
 		if (this.app.vault.getAbstractFileByPath(filePath)) {
-			return; // Already exists
+			return; // Path-based guard for race conditions
 		}
 
+		const projectLink = projectFile ? toWikiLink(projectFile.path) : '';
 		const context: SectionTemplateContext = {
 			section_name: sectionName,
 			section_id: sectionId,
 			project_name: projectName,
 			project_id: projectId,
+			project_link: projectLink,
 		};
 		let content: string;
 		if (this.settings.sectionNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.sectionNoteTemplate, now, context);
 		} else {
-			content = `---\nsection_name: "${sectionName}"\nsection_id: "${sectionId}"\nproject_name: "${projectName}"\nproject_id: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+			const projectLinkLine = projectLink ? `project_link: "${projectLink}"\n` : '';
+			content = `---\nsection_name: "${sectionName}"\nsection_id: "${sectionId}"\nproject_name: "${projectName}"\nproject_id: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
 		}
 		await this.app.vault.create(filePath, content);
 	}
@@ -233,8 +263,8 @@ export class TaskNoteRepository {
 	}
 
 	async listSyncedTasks(): Promise<SyncedTaskEntry[]> {
-		const index = await this.buildTodoistIdIndexInTaskFolder();
-		return Array.from(index.entries()).map(([todoistId, file]) => ({ todoistId, file }));
+		const { taskIndex } = this.buildVaultIndexes();
+		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
 	async applyMissingRemoteTasks(missingEntries: SyncedTaskEntry[], mode: ArchiveMode): Promise<number> {
@@ -586,7 +616,7 @@ export class TaskNoteRepository {
 		// The description is stored in the todoist_description frontmatter property instead.
 		// The note body is the user's personal notes area.
 
-		const renamedFile = await this.renameTaskFileToMatchTitle(file, item.content);
+		const renamedFile = await this.relocateTaskFileIfNeeded(file, item.content, projectName, sectionName);
 
 		return { created: 0, updated: 1, file: renamedFile };
 	}
@@ -661,39 +691,66 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private async buildTodoistIdIndexInTaskFolder(): Promise<Map<string, TFile>> {
-		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
-		const folderPrefix = `${normalizePath(resolvedFolder)}/`;
-		const index = new Map<string, TFile>();
+	private async applyParentProjectLinks(projectFileById: Map<string, TFile>, projectParentIdById: Map<string, string | null>): Promise<void> {
+		for (const [projectId, projectFile] of projectFileById) {
+			const parentId = projectParentIdById.get(projectId) ?? null;
+			if (!parentId) {
+				continue;
+			}
+			const parentFile = projectFileById.get(parentId);
+			if (!parentFile) {
+				continue;
+			}
+			const parentLink = toWikiLink(parentFile.path);
+			const frontmatter = this.app.metadataCache.getFileCache(projectFile)?.frontmatter as Record<string, unknown> | undefined;
+			const existing = typeof frontmatter?.['parent_project_link'] === 'string' ? frontmatter['parent_project_link'] : '';
+			if (existing === parentLink) {
+				continue;
+			}
+			await this.app.fileManager.processFrontMatter(projectFile, (fm) => {
+				(fm as Record<string, unknown>)['parent_project_link'] = parentLink;
+			});
+		}
+	}
+
+	private buildVaultIndexes(): {
+		taskIndex: Map<string, TFile>;
+		projectIndex: Map<string, TFile>;
+		sectionIndex: Map<string, TFile>;
+	} {
+		const taskIndex = new Map<string, TFile>();
+		const projectIndex = new Map<string, TFile>();
+		const sectionIndex = new Map<string, TFile>();
+		const p = getPropNames(this.settings);
+
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			if (!(file.path === normalizePath(resolvedFolder) || file.path.startsWith(folderPrefix))) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) {
 				continue;
 			}
 
-			const todoistId = await this.getTodoistId(file);
-			if (todoistId) {
-				index.set(todoistId, file);
+			// Task index: by todoist_id (vault-wide, not restricted to tasksFolderPath)
+			const rawId = fm[p.todoistId];
+			if (typeof rawId === 'string' && rawId.trim()) {
+				taskIndex.set(rawId.trim(), file);
+			} else if (typeof rawId === 'number') {
+				taskIndex.set(String(rawId), file);
+			}
+
+			// Project index: by project_id frontmatter
+			const rawProjectId = fm['project_id'];
+			if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
+				projectIndex.set(rawProjectId.trim(), file);
+			}
+
+			// Section index: by section_id frontmatter
+			const rawSectionId = fm['section_id'];
+			if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
+				sectionIndex.set(rawSectionId.trim(), file);
 			}
 		}
-		return index;
-	}
 
-	private async getTodoistId(file: TFile): Promise<string | null> {
-		const p = getPropNames(this.settings);
-		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const fromCache = frontmatter?.[p.todoistId];
-		if (typeof fromCache === 'string' && fromCache.trim()) {
-			return fromCache;
-		}
-		if (typeof fromCache === 'number') {
-			return String(fromCache);
-		}
-
-		const content = await this.app.vault.cachedRead(file);
-		// Fall back to regex scan using the configured property name
-		const escapedKey = p.todoistId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const pattern = new RegExp(`^---[\\s\\S]*?\\b${escapedKey}:\\s*["']?([^\\n"']+)["']?\\s*$`, 'm');
-		return content.match(pattern)?.[1]?.trim() ?? null;
+		return { taskIndex, projectIndex, sectionIndex };
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -712,7 +769,28 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string, projectName?: string, sectionName?: string): Promise<string> {
+	private async relocateTaskFileIfNeeded(
+		file: TFile,
+		title: string,
+		projectName?: string,
+		sectionName?: string,
+	): Promise<TFile> {
+		const desiredFolder = await this.getDesiredFolderPath(projectName, sectionName);
+		const currentFolder = getFolderPath(file.path);
+
+		if (normalizePath(currentFolder) !== normalizePath(desiredFolder)) {
+			const targetPath = await this.getUniqueFilePathInFolder(
+				desiredFolder,
+				`${file.basename}.md`,
+				file.path,
+			);
+			await this.app.fileManager.renameFile(file, targetPath);
+		}
+
+		return this.renameTaskFileToMatchTitle(file, title);
+	}
+
+	private async getDesiredFolderPath(projectName?: string, sectionName?: string): Promise<string> {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		let folder = normalizePath(resolvedFolder);
 
@@ -732,6 +810,11 @@ export class TaskNoteRepository {
 			}
 		}
 
+		return folder;
+	}
+
+	private async getUniqueTaskFilePath(taskTitle: string, todoistId: string, projectName?: string, sectionName?: string): Promise<string> {
+		const folder = await this.getDesiredFolderPath(projectName, sectionName);
 		const base = sanitizeFileName(taskTitle) || `Task-${todoistId}`;
 		const basePath = normalizePath(`${folder}/${base}.md`);
 		if (!this.app.vault.getAbstractFileByPath(basePath)) {

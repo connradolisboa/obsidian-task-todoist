@@ -308,7 +308,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(el)
 			.setName('Auto-rename task files from title')
-			.setDesc('When task title changes locally or in todoist, rename the note file to match.')
+			.setDesc('Rename the note file when the task title changes in Todoist. When disabled (default), only the task_title frontmatter property is updated — you control the filename.')
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.autoRenameTaskFiles).onChange(async (value) => {
 					this.plugin.settings.autoRenameTaskFiles = value;

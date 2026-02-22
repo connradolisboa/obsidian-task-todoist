@@ -119,7 +119,7 @@ export interface TaskTodoistSettings {
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	tasksFolderPath: 'Tasks',
 	defaultTaskTag: 'tasks',
-	autoRenameTaskFiles: true,
+	autoRenameTaskFiles: false,
 	autoSyncEnabled: true,
 	autoSyncIntervalMinutes: 5,
 	showScheduledSyncNotices: false,
