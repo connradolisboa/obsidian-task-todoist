@@ -22,6 +22,8 @@ interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
 	sectionNameById: Map<string, string>;
 	projectParentIdById?: Map<string, string | null>;
+	projectFileById?: Map<string, TFile>;
+	sectionFileById?: Map<string, TFile>;
 }
 
 interface UpsertResult {
@@ -121,9 +123,10 @@ export class TaskNoteRepository {
 			}
 
 			const existingFile = existingByTodoistId.get(item.id);
+			const mapsWithFiles: ProjectSectionMaps = { ...maps, projectFileById, sectionFileById: sectionIndex };
 			const upsertResult = existingFile
-				? await this.updateTaskFile(existingFile, item, maps)
-				: await this.createTaskFile(item, maps);
+				? await this.updateTaskFile(existingFile, item, mapsWithFiles)
+				: await this.createTaskFile(item, mapsWithFiles);
 
 			created += upsertResult.created;
 			updated += upsertResult.updated;
@@ -244,7 +247,8 @@ export class TaskNoteRepository {
 			const projectLinkLine = projectLink ? `project_link: "${projectLink}"\n` : '';
 			content = `---\n${p.vaultId}: "${generateUuid()}"\nsection_name: "${sectionName}"\n${p.sectionId}: "${sectionId}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
 		}
-		await this.app.vault.create(filePath, content);
+		const file = await this.app.vault.create(filePath, content);
+		sectionIndex.set(sectionId, file);
 	}
 
 	async repairMalformedSignatureFrontmatterLines(): Promise<number> {
@@ -624,7 +628,7 @@ export class TaskNoteRepository {
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
 		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
 		const filePath = await this.getUniqueTaskFilePath(item.content, item.id, projectName, sectionName);
-		const markdown = buildNewFileContent(item, maps.projectNameById, maps.sectionNameById, this.settings);
+		const markdown = buildNewFileContent(item, maps, this.settings);
 		const file = await this.app.vault.create(filePath, markdown);
 		return { created: 1, updated: 0, file };
 	}
@@ -651,6 +655,12 @@ export class TaskNoteRepository {
 
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
 		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
+		const projectLink = maps.projectFileById?.get(item.project_id)
+			? toWikiLink(maps.projectFileById.get(item.project_id)!.path)
+			: '';
+		const sectionLink = item.section_id && maps.sectionFileById?.get(item.section_id)
+			? toWikiLink(maps.sectionFileById.get(item.section_id)!.path)
+			: '';
 		const dueDate = item.due?.date ?? '';
 		const deadlineDate = item.deadline?.date ?? '';
 		const priority = item.priority ?? 1;
@@ -667,6 +677,8 @@ export class TaskNoteRepository {
 			data[p.todoistProjectName] = projectName;
 			data[p.todoistSectionId] = item.section_id ?? '';
 			data[p.todoistSectionName] = sectionName;
+			data[p.todoistProjectLink] = projectLink;
+			data[p.todoistSectionLink] = sectionLink;
 			data[p.todoistPriority] = priority;
 			data[p.todoistPriorityLabel] = priorityLabel(priority);
 			data[p.todoistDue] = dueDate;
@@ -1002,15 +1014,20 @@ export class TaskNoteRepository {
 
 function buildNewFileContent(
 	item: TodoistItem,
-	projectNameById: Map<string, string>,
-	sectionNameById: Map<string, string>,
+	maps: ProjectSectionMaps,
 	settings: TaskTodoistSettings,
 ): string {
 	const now = new Date();
 	const defaultTag = getDefaultTaskTag(settings) ?? 'tasks';
 	const p = getPropNames(settings);
-	const projectName = projectNameById.get(item.project_id) ?? 'Unknown';
-	const sectionName = item.section_id ? (sectionNameById.get(item.section_id) ?? '') : '';
+	const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+	const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
+	const projectLink = maps.projectFileById?.get(item.project_id)
+		? toWikiLink(maps.projectFileById.get(item.project_id)!.path)
+		: '';
+	const sectionLink = item.section_id && maps.sectionFileById?.get(item.section_id)
+		? toWikiLink(maps.sectionFileById.get(item.section_id)!.path)
+		: '';
 	const description = item.description?.trim() ?? '';
 	const todoistUrl = buildTodoistUrl(item.id, settings);
 	const dueDate = item.due?.date ?? '';
@@ -1068,10 +1085,9 @@ function buildNewFileContent(
 		`${p.todoistDeadlineDateTyped}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
 		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
 		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
-		`${p.todoistLastImportedSignature}: "${escapeDoubleQuotes(buildRemoteImportSignature(item, {
-			projectNameById,
-			sectionNameById,
-		}))}"`,
+		`${p.todoistProjectLink}: ${toQuotedYaml(projectLink)}`,
+		`${p.todoistSectionLink}: ${toQuotedYaml(sectionLink)}`,
+		`${p.todoistLastImportedSignature}: "${escapeDoubleQuotes(buildRemoteImportSignature(item, maps))}"`,
 		`${p.todoistLastSyncedSignature}: "${escapeDoubleQuotes(buildTodoistSyncSignature({
 			title: item.content,
 			description,

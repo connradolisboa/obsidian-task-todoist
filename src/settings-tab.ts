@@ -641,6 +641,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist project name', 'Human-readable Todoist project name.', 'todoistProjectName');
 		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID.', 'todoistSectionId');
 		this.addPropNameSetting(el, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
+		this.addPropNameSetting(el, 'Todoist project link', 'Wikilink to the project note (e.g. [[Projects/My Project|My Project]]).', 'todoistProjectLink');
+		this.addPropNameSetting(el, 'Todoist section link', 'Wikilink to the section note (e.g. [[Projects/My Project/Section|Section]]).', 'todoistSectionLink');
 		this.addPropNameSetting(el, 'Todoist priority', 'Task priority (1–4).', 'todoistPriority');
 		this.addPropNameSetting(el, 'Todoist due date', 'ISO due date from Todoist.', 'todoistDue');
 		this.addPropNameSetting(el, 'Todoist due string', 'Natural language recurrence string from Todoist.', 'todoistDueString');
