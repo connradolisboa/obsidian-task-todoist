@@ -1003,7 +1003,9 @@ function buildNewFileContent(
 }
 
 function toWikiLink(filePath: string): string {
-	return `[[${filePath.replace(/\.md$/i, '')}]]`;
+	const pathWithoutExt = filePath.replace(/\.md$/i, '');
+	const displayText = pathWithoutExt.split('/').pop() || pathWithoutExt;
+	return `[[${pathWithoutExt}|${displayText}]]`;
 }
 
 function getFolderPath(path: string): string {
