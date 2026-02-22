@@ -197,7 +197,18 @@ export class TaskNoteRepository {
 		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
 		} else {
-			content = `---\n${p.vaultId}: "${generateUuid()}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\ncreated: "${formatCreatedDate(now)}"\n---\n`;
+			content = [
+				'---',
+				`${p.vaultId}: "${generateUuid()}"`,
+				`project_name: "${escapeDoubleQuotes(projectName)}"`,
+				`${p.projectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.created}: "${formatCreatedDate(now)}"`,
+				`${p.modified}: "${formatModifiedDate(now)}"`,
+				`${p.tags}: []`,
+				`${p.links}: []`,
+				'---',
+				'',
+			].join('\n');
 		}
 		const file = await this.app.vault.create(filePath, content);
 		projectIndex.set(projectId, file);
@@ -244,8 +255,21 @@ export class TaskNoteRepository {
 		if (this.settings.sectionNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.sectionNoteTemplate, now, context);
 		} else {
-			const projectLinkLine = projectLink ? `project_link: "${projectLink}"\n` : '';
-			content = `---\n${p.vaultId}: "${generateUuid()}"\nsection_name: "${sectionName}"\n${p.sectionId}: "${sectionId}"\nproject_name: "${projectName}"\n${p.projectId}: "${projectId}"\n${projectLinkLine}created: "${formatCreatedDate(now)}"\n---\n`;
+			content = [
+				'---',
+				`${p.vaultId}: "${generateUuid()}"`,
+				`section_name: "${escapeDoubleQuotes(sectionName)}"`,
+				`${p.sectionId}: "${escapeDoubleQuotes(sectionId)}"`,
+				`project_name: "${escapeDoubleQuotes(projectName)}"`,
+				`${p.projectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.todoistProjectLink}: "${escapeDoubleQuotes(projectLink)}"`,
+				`${p.created}: "${formatCreatedDate(now)}"`,
+				`${p.modified}: "${formatModifiedDate(now)}"`,
+				`${p.tags}: []`,
+				`${p.links}: []`,
+				'---',
+				'',
+			].join('\n');
 		}
 		const file = await this.app.vault.create(filePath, content);
 		sectionIndex.set(sectionId, file);
