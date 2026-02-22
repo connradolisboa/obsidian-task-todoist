@@ -51,19 +51,19 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 
 ### PR 5: Delete file when task is deleted in Todoist
 
-- [ ] Add `'delete-file'` to `ArchiveMode` type in `src/settings.ts`
-- [ ] Add dropdown option "Move to Obsidian trash (recoverable)" in `src/settings-tab.ts`
-- [ ] In `applyMissingRemoteTasks()` (`src/task-note-repository.ts`), add branch: `await this.app.vault.trash(entry.file, false)` (use `.trash()`, not `.delete()` — keeps files recoverable)
+- [x] Add `'delete-file'` to `ArchiveMode` type in `src/settings.ts`
+- [x] Add dropdown option "Move to Obsidian trash (recoverable)" in `src/settings-tab.ts`
+- [x] In `applyMissingRemoteTasks()` (`src/task-note-repository.ts`), add branch: `await this.app.vault.trash(entry.file, false)` (use `.trash()`, not `.delete()` — keeps files recoverable)
 
 ### PR 6: Archive project/section notes when archived in Todoist
 > When a project or section is archived in Todoist, its note moves to a configurable archive folder. Tasks under it are already handled by the existing archive mode.
 
-- [ ] Add `is_archived: boolean` to `TodoistProject` and `TodoistSection` in `src/todoist-client.ts`; extract in `normalizeProjects()` / `normalizeSections()`
-- [ ] Add `projectArchiveFolderPath: string` setting (default `'Projects/_archive'`)
-- [ ] Add `sectionArchiveFolderPath: string` setting (default `''` = under project archive folder)
-- [ ] Add UI path settings in `src/settings-tab.ts` Sync tab
-- [ ] Add `applyArchivedProjectsAndSections()` to `src/task-note-repository.ts` — uses project/section ID indexes (Tier 1) to find notes and move them
-- [ ] Call `applyArchivedProjectsAndSections()` from `src/sync-service.ts` after building the snapshot
+- [x] Add `is_archived: boolean` to `TodoistProject` and `TodoistSection` in `src/todoist-client.ts`; extract in `normalizeProjects()` / `normalizeSections()`
+- [x] Add `projectArchiveFolderPath: string` setting (default `'Projects/_archive'`)
+- [x] Add `sectionArchiveFolderPath: string` setting (default `''` = under project archive folder)
+- [x] Add UI path settings in `src/settings-tab.ts` Sync tab
+- [x] Add `applyArchivedProjectsAndSections()` to `src/task-note-repository.ts` — uses project/section ID indexes (Tier 1) to find notes and move them
+- [x] Call `applyArchivedProjectsAndSections()` from `src/sync-service.ts` after building the snapshot
 
 ---
 
@@ -77,9 +77,9 @@ Organized implementation plan. Tasks are grouped by dependency tier — complete
 - [x] Project in excluded list → its tasks not imported on sync
 - [x] Section name in excluded list → tasks in that section not imported
 - [x] Project in area list → project note uses area template
-- [ ] Archive mode = "Move to Obsidian trash" → deleted Todoist task → note appears in `.trash`
-- [ ] Archive project in Todoist → sync → project note moves to `projectArchiveFolderPath`
-- [ ] `npm run build` passes with no TypeScript errors
+- [x] Archive mode = "Move to Obsidian trash" → deleted Todoist task → note appears in `.trash`
+- [x] Archive project in Todoist → sync → project note moves to `projectArchiveFolderPath`
+- [x] `npm run build` passes with no TypeScript errors
 
 ---
 

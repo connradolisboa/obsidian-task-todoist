@@ -382,6 +382,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.addOption('none', 'Keep notes in place')
 					.addOption('move-to-archive-folder', 'Move notes to archive folder')
 					.addOption('mark-local-done', 'Only mark notes as done')
+					.addOption('delete-file', 'Move to Obsidian trash (recoverable)')
 					.setValue(this.plugin.settings.archiveMode)
 					.onChange(async (value) => {
 						this.plugin.settings.archiveMode = value as ArchiveMode;
@@ -398,6 +399,36 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.archiveFolderPath)
 					.onChange(async (value) => {
 						this.plugin.settings.archiveFolderPath = value.trim() || 'Tasks/_archive';
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 32;
+			});
+
+		new Setting(el).setName('Project & section archive').setHeading();
+
+		new Setting(el)
+			.setName('Project archive folder path')
+			.setDesc('Folder where archived Todoist project notes are moved during sync. Default: Projects/_archive.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Projects/_archive')
+					.setValue(this.plugin.settings.projectArchiveFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.projectArchiveFolderPath = value.trim() || 'Projects/_archive';
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 32;
+			});
+
+		new Setting(el)
+			.setName('Section archive folder path')
+			.setDesc('Folder where archived Todoist section notes are moved. Leave empty to use the project archive folder.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Leave empty to use project archive folder')
+					.setValue(this.plugin.settings.sectionArchiveFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.sectionArchiveFolderPath = value.trim();
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.size = 32;

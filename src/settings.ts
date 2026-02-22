@@ -1,6 +1,6 @@
 export const DEFAULT_TODOIST_TOKEN_SECRET_NAME = 'todoist-api';
 
-export type ArchiveMode = 'none' | 'move-to-archive-folder' | 'mark-local-done';
+export type ArchiveMode = 'none' | 'move-to-archive-folder' | 'mark-local-done' | 'delete-file';
 export type ImportProjectScope = 'all-projects' | 'allow-list-by-name';
 export type TodoistLinkStyle = 'app' | 'web';
 export type ConflictResolution = 'local-wins' | 'remote-wins';
@@ -118,6 +118,8 @@ export interface TaskTodoistSettings {
 	excludedSectionNames: string;
 	areaProjectNames: string;
 	areaProjectNoteTemplate: string;
+	projectArchiveFolderPath: string;
+	sectionArchiveFolderPath: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -152,4 +154,6 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	excludedSectionNames: '',
 	areaProjectNames: '',
 	areaProjectNoteTemplate: '',
+	projectArchiveFolderPath: 'Projects/_archive',
+	sectionArchiveFolderPath: '',
 };

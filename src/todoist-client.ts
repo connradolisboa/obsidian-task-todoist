@@ -30,12 +30,14 @@ export interface TodoistProject {
 	id: string;
 	name: string;
 	parent_id: string | null;
+	is_archived: boolean;
 }
 
 export interface TodoistSection {
 	id: string;
 	name: string;
 	project_id: string;
+	is_archived: boolean;
 }
 
 export interface TodoistSyncSnapshot {
@@ -335,7 +337,7 @@ function normalizeProjects(rawProjects: Array<Record<string, unknown>>): Todoist
 			if (!id || !name) {
 				return null;
 			}
-			return { id, name, parent_id: toOptionalId(raw.parent_id) };
+			return { id, name, parent_id: toOptionalId(raw.parent_id), is_archived: Boolean(raw.is_archived) };
 		})
 		.filter((project): project is TodoistProject => Boolean(project));
 }
@@ -349,7 +351,7 @@ function normalizeSections(rawSections: Array<Record<string, unknown>>): Todoist
 			if (!id || !name || !projectId) {
 				return null;
 			}
-			return { id, name, project_id: projectId };
+			return { id, name, project_id: projectId, is_archived: Boolean(raw.is_archived) };
 		})
 		.filter((section): section is TodoistSection => Boolean(section));
 }

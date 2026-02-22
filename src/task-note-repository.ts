@@ -285,7 +285,13 @@ export class TaskNoteRepository {
 					: (typeof cachedFrontmatter?.sync_status === 'string' ? cachedFrontmatter.sync_status : '');
 			const currentTaskStatus = cachedFrontmatter ? getTaskStatus(cachedFrontmatter, this.settings) : 'open';
 
-			if (mode === 'none') {
+			if (mode === 'delete-file') {
+			await this.app.vault.trash(entry.file, false);
+			changed += 1;
+			continue;
+		}
+
+		if (mode === 'none') {
 				if (currentSyncStatus === 'missing_remote') {
 					continue;
 				}
@@ -333,6 +339,59 @@ export class TaskNoteRepository {
 			changed += 1;
 		}
 		return changed;
+	}
+
+	async applyArchivedProjectsAndSections(
+		archivedProjectIds: Set<string>,
+		archivedSectionIds: Set<string>,
+	): Promise<number> {
+		if (archivedProjectIds.size === 0 && archivedSectionIds.size === 0) {
+			return 0;
+		}
+		let moved = 0;
+		const { projectIndex, sectionIndex } = this.buildVaultIndexes();
+		const resolvedProjectArchive = normalizePath(resolveTemplateVars(
+			this.settings.projectArchiveFolderPath || 'Projects/_archive',
+		));
+		const resolvedSectionArchive = normalizePath(resolveTemplateVars(
+			this.settings.sectionArchiveFolderPath || this.settings.projectArchiveFolderPath || 'Projects/_archive',
+		));
+
+		for (const projectId of archivedProjectIds) {
+			const file = projectIndex.get(projectId);
+			if (!file) {
+				continue;
+			}
+			const archivePrefix = `${resolvedProjectArchive}/`;
+			if (file.path === resolvedProjectArchive || file.path.startsWith(archivePrefix)) {
+				continue;
+			}
+			await this.ensureFolderExists(resolvedProjectArchive);
+			const targetPath = await this.getUniqueFilePathInFolder(resolvedProjectArchive, file.name, file.path);
+			if (targetPath !== file.path) {
+				await this.app.fileManager.renameFile(file, targetPath);
+				moved += 1;
+			}
+		}
+
+		for (const sectionId of archivedSectionIds) {
+			const file = sectionIndex.get(sectionId);
+			if (!file) {
+				continue;
+			}
+			const archivePrefix = `${resolvedSectionArchive}/`;
+			if (file.path === resolvedSectionArchive || file.path.startsWith(archivePrefix)) {
+				continue;
+			}
+			await this.ensureFolderExists(resolvedSectionArchive);
+			const targetPath = await this.getUniqueFilePathInFolder(resolvedSectionArchive, file.name, file.path);
+			if (targetPath !== file.path) {
+				await this.app.fileManager.renameFile(file, targetPath);
+				moved += 1;
+			}
+		}
+
+		return moved;
 	}
 
 	async listPendingLocalCreates(): Promise<PendingLocalCreate[]> {
