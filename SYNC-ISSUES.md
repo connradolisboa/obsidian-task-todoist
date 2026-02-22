@@ -15,13 +15,13 @@ All changes confined to `src/task-note-repository.ts`.
     - If sanitized name differs and `useProjectSubfolders`: rename folder `{tasksFolder}/{oldSanitized}` → `{tasksFolder}/{newSanitized}`, then rename file inside
     - If `projectNotesFolderPath`: rename just the file
 
-- [ ] **3. Fix section renames + stale section → project link** — `ensureSectionNote` (~lines 218–276)
+- [x] **3. Fix section renames + stale section → project link** — `ensureSectionNote` (~lines 218–276)
   - **Root cause:** Found-by-ID path returns early without updating `section_name` or `todoist_project_link`
   - **Fix:** Check both `section_name` and `todoist_project_link` against current values; if either stale:
     - Update frontmatter
     - If sanitized section name differs: rename section subfolder and file
 
-- [ ] **4. Fix task wikilinks not updating** — `updateTaskFile` (~lines 813–815)
+- [x] **4. Fix task wikilinks not updating** — `updateTaskFile` (~lines 813–815)
   - **Root cause:** Signature-match early return skips `processFrontMatter` entirely — tasks never get `todoist_project_link`/`todoist_section_link` when project/section notes are created after the task was first synced
   - **Fix:** Before returning on signature match, compute `projectLink`/`sectionLink`, compare to cached values; if stale, run a targeted `processFrontMatter` for just those two fields (no stat increment)
 

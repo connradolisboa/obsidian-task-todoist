@@ -264,9 +264,67 @@ export class TaskNoteRepository {
 		return file;
 	}
 
+	/**
+	 * If the cached section_name or todoist_project_link on an existing section note is stale,
+	 * updates the frontmatter and renames the file/subfolder to match.
+	 */
+	private async updateSectionNoteIfStale(file: TFile, sectionId: string, sectionName: string, projectFile: TFile | null): Promise<void> {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return;
+
+		const p = getPropNames(this.settings);
+		const cachedSectionName = typeof fm['section_name'] === 'string' ? (fm['section_name'] as string) : null;
+		const cachedProjectLink = typeof fm[p.todoistProjectLink] === 'string' ? (fm[p.todoistProjectLink] as string) : null;
+
+		const currentProjectLink = projectFile ? toWikiLink(projectFile.path) : '';
+		const sectionNameStale = cachedSectionName !== null && cachedSectionName !== sectionName;
+		const projectLinkStale = cachedProjectLink !== null && cachedProjectLink !== currentProjectLink;
+
+		if (!sectionNameStale && !projectLinkStale) return;
+
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			if (sectionNameStale) frontmatter['section_name'] = sectionName;
+			if (projectLinkStale) frontmatter[p.todoistProjectLink] = currentProjectLink;
+		});
+
+		if (!sectionNameStale) return;
+
+		const oldSanitized = sanitizeFileName(cachedSectionName!) || sectionId;
+		const newSanitized = sanitizeFileName(sectionName) || sectionId;
+		if (oldSanitized === newSanitized) return;
+
+		if (this.settings.sectionNotesFolderPath?.trim()) {
+			// Dedicated folder — rename the file
+			const folderPath = normalizePath(resolveTemplateVars(this.settings.sectionNotesFolderPath));
+			const newFilePath = normalizePath(`${folderPath}/${newSanitized}.md`);
+			if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+				await this.app.fileManager.renameFile(file, newFilePath);
+			}
+		} else {
+			// Default: section note lives inside a subfolder named after the section
+			const sectionFolder = file.parent;
+			if (sectionFolder instanceof TFolder) {
+				const parentPath = sectionFolder.parent?.path ?? '';
+				const newFolderPath = normalizePath(`${parentPath}/${newSanitized}`);
+				if (!this.app.vault.getAbstractFileByPath(newFolderPath)) {
+					await this.app.fileManager.renameFile(sectionFolder, newFolderPath);
+					// Obsidian updates file.path in-place after folder rename
+					if (file.name !== `${newSanitized}.md`) {
+						const newFilePath = normalizePath(`${newFolderPath}/${newSanitized}.md`);
+						if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+							await this.app.fileManager.renameFile(file, newFilePath);
+						}
+					}
+				}
+			}
+		}
+	}
+
 	private async ensureSectionNote(sectionId: string, sectionName: string, projectId: string, projectName: string, sectionIndex: Map<string, TFile>, projectFile: TFile | null): Promise<void> {
 		// Check by ID vault-wide — finds the note even if it was renamed or moved
 		if (sectionIndex.has(sectionId)) {
+			const file = sectionIndex.get(sectionId)!;
+			await this.updateSectionNoteIfStale(file, sectionId, sectionName, projectFile);
 			return;
 		}
 
@@ -864,6 +922,27 @@ export class TaskNoteRepository {
 				? cachedFrontmatter[p.todoistLastImportedSignature] as string
 				: '';
 		if (lastImportedSignature === remoteImportSignature) {
+			// Even when the import signature matches, project/section wikilinks may be stale
+			// if project/section notes were created after the task was first synced.
+			const projectLink = maps.projectFileById?.get(item.project_id)
+				? toWikiLink(maps.projectFileById.get(item.project_id)!.path)
+				: '';
+			const sectionLink = item.section_id && maps.sectionFileById?.get(item.section_id)
+				? toWikiLink(maps.sectionFileById.get(item.section_id)!.path)
+				: '';
+			const cachedProjectLink = typeof cachedFrontmatter?.[p.todoistProjectLink] === 'string'
+				? cachedFrontmatter[p.todoistProjectLink] as string
+				: '';
+			const cachedSectionLink = typeof cachedFrontmatter?.[p.todoistSectionLink] === 'string'
+				? cachedFrontmatter[p.todoistSectionLink] as string
+				: '';
+			if (projectLink !== cachedProjectLink || sectionLink !== cachedSectionLink) {
+				await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					const data = frontmatter as Record<string, unknown>;
+					data[p.todoistProjectLink] = projectLink;
+					data[p.todoistSectionLink] = sectionLink;
+				});
+			}
 			return { created: 0, updated: 0, file };
 		}
 
