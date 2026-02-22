@@ -92,3 +92,36 @@
 .task-todoist-lock-indicator.is-visible {
 	opacity: 0.8;
 }
+
+/* Settings tab bar */
+.task-todoist-settings-tab-bar {
+	display: flex;
+	gap: 0;
+	margin-bottom: 1rem;
+	border-bottom: 1px solid var(--background-modifier-border);
+	overflow-x: auto;
+}
+
+.task-todoist-settings-tab {
+	padding: 0.4rem 0.9rem;
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+	white-space: nowrap;
+	margin-bottom: -1px;
+	border-radius: 0;
+}
+
+.task-todoist-settings-tab:hover {
+	color: var(--text-normal);
+	background: none;
+}
+
+.task-todoist-settings-tab.is-active {
+	color: var(--text-normal);
+	border-bottom-color: var(--interactive-accent);
+}
