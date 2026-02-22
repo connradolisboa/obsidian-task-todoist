@@ -74,7 +74,7 @@ export async function createLocalTaskNote(
 	const frontmatter = [
 		'---',
 		`${p.vaultId}: "${generateUuid()}"`,
-		`${p.taskStatus}: open`,
+		`${p.taskStatus}: Open`,
 		`${p.taskDone}: false`,
 		`${p.created}: "${createdDateStr}"`,
 		`${p.todoistCreatedDate}: "${createdDateStr}"`,

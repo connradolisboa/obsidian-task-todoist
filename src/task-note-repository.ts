@@ -1059,7 +1059,7 @@ function buildNewFileContent(
 	const yaml = [
 		'---',
 		`${p.vaultId}: "${generateUuid()}"`,
-		`${p.taskStatus}: ${item.checked ? 'done' : 'open'}`,
+		`${p.taskStatus}: ${item.checked ? 'Done' : 'Open'}`,
 		`${p.taskDone}: ${item.checked ? 'true' : 'false'}`,
 		`${p.created}: "${createdDateStr}"`,
 		`${p.todoistCreatedDate}: "${createdDateStr}"`,

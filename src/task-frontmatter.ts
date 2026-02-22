@@ -92,7 +92,7 @@ export function setTaskStatus(
 	settings: TaskTodoistSettings,
 ): void {
 	const p = getPropNames(settings);
-	frontmatter[p.taskStatus] = status;
+	frontmatter[p.taskStatus] = status === 'done' ? 'Done' : 'Open';
 	frontmatter[p.taskDone] = status === 'done';
 	// Remove legacy keys if present
 	if (p.taskStatus !== 'status' && 'status' in frontmatter) {
