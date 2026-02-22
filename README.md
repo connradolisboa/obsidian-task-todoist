@@ -1,136 +1,81 @@
-# Task Todoist Sync for Obsidian
+# Obsidian Task Todoist
 
-Sync Todoist tasks with task notes in Obsidian, with two-way status updates and Bases-friendly frontmatter.
+This is a plugin for [Obsidian](https://obsidian.md/) that provides two-way synchronization between Obsidian task notes and [Todoist](https://todoist.com/).
 
-## What it does
+It allows you to manage your Todoist tasks as notes in your Obsidian vault, leveraging the power of both platforms.
 
-- Imports Todoist tasks into a dedicated tasks folder as Markdown notes.
-- Pushes local task note updates back to Todoist.
-- Supports inline checklist conversion to task notes.
-- Keeps linked checklist checkboxes in sync with task note status.
-- Supports due dates and recurring rules.
-- Stores Todoist API token in Obsidian secret storage.
+## Features
 
-## Frontmatter model
+*   **Two-way Sync:** Keep your tasks updated in both Obsidian and Todoist.
+*   **Flexible Task Import:** Use filters to import tasks from specific projects, with certain labels, or assigned to you.
+*   **Customizable Task Notes:** Use templates to define the structure of your task notes, including frontmatter and content.
+*   **Offline Support:** Create and update tasks in Obsidian while offline, and sync them with Todoist when you're back online.
+*   **Convert Checklist Items:** Quickly convert checklist items from any note into a synced task note.
+*   **Project and Section Notes:** Automatically create notes for your Todoist projects and sections.
+*   **Highly Customizable:** A comprehensive settings panel allows you to tailor the plugin to your workflow.
 
-Task notes use these core fields:
+## Getting Started
 
-- `task_title`
-- `task_status` (`open` | `done`)
-- `task_done` (boolean, useful for editable Bases checkbox column)
-- `todoist_sync` (boolean)
-- `todoist_sync_status`
-- `todoist_id`
-- `todoist_project_name`
-- `todoist_section_name`
-- `todoist_due` (date value)
-- `todoist_due_string` (natural-language due rule, including recurrence)
-- `todoist_is_recurring` (boolean)
-- `parent_task` (optional wiki-link to parent task)
+1.  **Install the Plugin:** This plugin is not yet in the community plugins browser. To install it, you need to manually add it to your vault's `.obsidian/plugins` directory.
+2.  **Get Your Todoist API Token:**
+    *   Go to your Todoist account's [Integrations](https://todoist.com/app/settings/integrations) page.
+    *   In the "API token" section, you'll find your personal API token. Copy it.
+3.  **Configure the Plugin:**
+    *   Open Obsidian's settings and go to the "Task Todoist" tab.
+    *   Paste your API token into the "Todoist API token" field.
+    *   Click "Test connection" to ensure the token is correct.
+    *   Configure the rest of the settings to your liking. Pay special attention to the "Task folder path" to define where your task notes will be stored.
 
-## First run (recommended order)
+## How to Use
 
-1. Build and install plugin files into your vault plugin folder.
-2. Open **Settings -> Community plugins -> Task Todoist Sync**.
-3. Set **Token secret name** (default: `todoist-api`).
-4. Set your Todoist API token in **Todoist API token**.
-5. Use **Test connection** and confirm success.
-6. Configure:
-- Tasks folder path
-- Archive behavior
-- Import scope/rules
-- Auto-sync interval (optional)
-7. Run **Sync todoist now** once.
+### Syncing Tasks
 
-## Creating tasks
+You can sync your tasks in several ways:
 
-### Create task modal
+*   **Manual Sync:** Run the "Sync todoist now" command from the command palette or click the "Sync now" button in the settings.
+*   **Scheduled Sync:** Enable "Enable scheduled sync" in the settings to have the plugin sync automatically in the background.
 
-Use the command **Create task note** and fill:
+### Creating Tasks
 
-- Title
-- Description
-- Optional project and section
-- Optional due date
-- Optional recurrence (example: `every weekday`)
-- Sync toggle
+#### From Obsidian
 
-### Inline conversion
+*   **Create a Task Note:** Use the "Create task note" command to open a modal where you can define the task's title, description, and other properties. If you have "Todoist Sync" enabled in the modal, the task will be created in Todoist on the next sync.
+*   **Convert a Checklist Item:** In any note, if you have an unchecked checklist item (`- [ ] Your task`), you can click the `↗` button that appears next to it (if enabled in settings) or use the "Convert checklist item to task note" command to turn it into a synced task note.
 
-You can write a normal unchecked checklist item and convert it to a task note.
+#### From Todoist
 
-Supported inline directives:
+Create a task in Todoist as you normally would. If it matches the import rules you've configured in the plugin's settings, it will be imported as a new task note on the next sync.
 
-- `proj::Work` or `project::Work`
-- `sec::Urgent` or `section::Urgent`
-- `due::2026-02-12` or `due::today`
-- `recur::"every weekday"` or `recurrence::"every weekday"`
+### Task Notes
 
-Example:
+Each task is a separate note in your vault. The note's frontmatter contains all the metadata related to the task, such as the due date, priority, and Todoist-specific information. The body of the note is for your personal notes and is not synced to Todoist's description.
 
-```md
-- [ ] Review draft proj::Personal due::tomorrow
-- [ ] Daily standup recur::"every weekday"
-```
+### Settings Overview
 
-## Sync behavior notes
+The plugin offers a wide range of settings to customize your experience:
 
-- Local edits in task notes are marked `todoist_sync_status: dirty_local` and pushed on next sync.
-- Editing `task_done` in Bases is supported and syncs to Todoist.
-- Clearing `todoist_due` locally is synced (remote due is cleared).
-- Recurring tasks are represented by `todoist_is_recurring` and `todoist_due_string`.
+*   **General:** Configure your Todoist API token, the folder for your task notes, and other basic settings.
+*   **Import:** Define the rules for which tasks to import from Todoist. You can filter by project, label, and assignee.
+*   **Sync:** Control sync-related settings, such as the automatic sync interval, conflict resolution, and how to handle archived tasks.
+*   **Notes:** Customize the templates for your task notes, project notes, and section notes.
+*   **Properties:** Change the names of the frontmatter properties used in your task notes.
 
-## Bases
+## Architecture
 
-A sample `Tasks.base` is included in repo root and uses:
+The plugin is built with a clear separation of concerns, making it robust and maintainable.
 
-- `task_title`
-- `task_done`
-- `task_status`
-- `todoist_due`
-- `todoist_project_name`
-- `todoist_sync_status`
+*   `main.ts`: The main plugin entry point, responsible for initialization, command registration, and orchestrating the sync process.
+*   `todoist-client.ts`: A dedicated client for all communication with the Todoist Sync API.
+*   `sync-service.ts`: The core of the plugin, containing the logic for the two-way sync.
+*   `task-note-repository.ts`: An abstraction layer for interacting with the task notes in the Obsidian vault.
+*   `settings-tab.ts`: The UI for the plugin's settings panel.
 
-## Development
+This architecture ensures that the different parts of the plugin are decoupled and can be developed and tested independently.
 
-Install dependencies:
+## Contributing
 
-```bash
-npm install
-```
+This project is open to contributions. If you find a bug or have a feature request, please open an issue on the GitHub repository.
 
-Watch mode:
+## License
 
-```bash
-npm run dev
-```
-
-Typecheck + production build:
-
-```bash
-npm run build
-```
-
-Lint:
-
-```bash
-npm run lint
-```
-
-Package release artifacts into `release/`:
-
-```bash
-npm run package
-```
-
-## Manual install in a vault
-
-Copy these files into:
-
-`<Vault>/.obsidian/plugins/obsidian-task-todoist/`
-
-- `main.js`
-- `manifest.json`
-- `styles.css`
-
-For convenience you can copy from `release/` after `npm run package`.
+This plugin is licensed under the MIT License. See the `LICENSE` file for more details.

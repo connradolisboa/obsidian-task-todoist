@@ -660,11 +660,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		this.addPropNameSetting(el, 'Todoist description', 'Stores the Todoist task description. The note body is your personal notes and is not synced.', 'todoistDescription');
 		this.addPropNameSetting(el, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting).', 'todoistUrl');
-		this.addPropNameSetting(el, 'Due date (date type)', 'Date-typed due date for Obsidian Bases calendar views. Stores the same date as the due date field but as a pure YYYY-MM-DD.', 'todoistDueDateTyped');
 		this.addPropNameSetting(el, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
 		this.addPropNameSetting(el, 'Deadline date', 'Hard deadline from Todoist (separate from due date).', 'todoistDeadline');
-		this.addPropNameSetting(el, 'Deadline date (date type)', 'Date-typed deadline for Obsidian Bases calendar views.', 'todoistDeadlineDateTyped');
-		this.addPropNameSetting(el, 'Task created date', 'Date-typed creation date. Use in Bases to compute task age (e.g. days since created).', 'todoistCreatedDate');
 
 		new Setting(el).setName('Project & section note properties').setHeading();
 

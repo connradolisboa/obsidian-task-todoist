@@ -39,12 +39,9 @@ export interface PropNames {
 	// New properties
 	todoistDescription: string;
 	todoistUrl: string;
-	// Date-typed properties for Obsidian Bases
-	todoistDueDateTyped: string;
+	// Human-readable labels and additional Todoist properties
 	todoistPriorityLabel: string;
 	todoistDeadline: string;
-	todoistDeadlineDateTyped: string;
-	todoistCreatedDate: string;
 	// Project & section note properties
 	projectId: string;
 	sectionId: string;
@@ -88,11 +85,8 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistLastImportedAt: 'todoist_last_imported_at',
 	todoistDescription: 'todoist_description',
 	todoistUrl: 'todoist_url',
-	todoistDueDateTyped: 'task_due_date',
 	todoistPriorityLabel: 'task_priority_label',
 	todoistDeadline: 'todoist_deadline',
-	todoistDeadlineDateTyped: 'task_deadline_date',
-	todoistCreatedDate: 'task_created_date',
 	projectId: 'project_id',
 	sectionId: 'section_id',
 	todoistProjectLink: 'todoist_project_link',

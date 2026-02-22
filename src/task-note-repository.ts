@@ -706,11 +706,9 @@ export class TaskNoteRepository {
 			data[p.todoistPriority] = priority;
 			data[p.todoistPriorityLabel] = priorityLabel(priority);
 			data[p.todoistDue] = dueDate;
-			data[p.todoistDueDateTyped] = dueDate || null;
 			data[p.todoistDueString] = item.due?.string ?? '';
 			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
 			data[p.todoistDeadline] = deadlineDate || null;
-			data[p.todoistDeadlineDateTyped] = deadlineDate || null;
 			data[p.todoistDescription] = item.description?.trim() ?? '';
 			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
 			data[p.todoistLastImportedSignature] = remoteImportSignature;
@@ -1086,7 +1084,6 @@ function buildNewFileContent(
 		`${p.taskStatus}: ${item.checked ? 'Done' : 'Open'}`,
 		`${p.taskDone}: ${item.checked ? 'true' : 'false'}`,
 		`${p.created}: "${createdDateStr}"`,
-		`${p.todoistCreatedDate}: "${createdDateStr}"`,
 		`${p.modified}: "${formatModifiedDate(now)}"`,
 		`${p.tags}:`,
 		`  - ${defaultTag}`,
@@ -1102,11 +1099,9 @@ function buildNewFileContent(
 		`${p.todoistPriority}: ${priority}`,
 		`${p.todoistPriorityLabel}: "${priorityLabel(priority)}"`,
 		`${p.todoistDue}: "${escapeDoubleQuotes(dueDate)}"`,
-		`${p.todoistDueDateTyped}: ${dueDate ? toQuotedYaml(dueDate) : 'null'}`,
 		`${p.todoistDueString}: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
 		`${p.todoistIsRecurring}: ${item.due?.is_recurring ? 'true' : 'false'}`,
 		`${p.todoistDeadline}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
-		`${p.todoistDeadlineDateTyped}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
 		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
 		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 		`${p.todoistProjectLink}: ${toQuotedYaml(projectLink)}`,
