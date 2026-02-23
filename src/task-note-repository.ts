@@ -15,7 +15,7 @@ import {
 	setTaskTitle,
 	touchModifiedDate,
 } from './task-frontmatter';
-import { buildTodoistUrl, sanitizeFileName } from './task-note-factory';
+import { buildTodoistUrl, buildTodoistProjectUrl, sanitizeFileName } from './task-note-factory';
 import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
 
 interface ProjectSectionMaps {
@@ -247,7 +247,8 @@ export class TaskNoteRepository {
 			return null;
 		}
 
-		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId };
+		const todoistUrl = buildTodoistProjectUrl(projectId, this.settings);
+		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId, url: todoistUrl };
 		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
 		const isArea = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
 		let content: string;
@@ -261,6 +262,7 @@ export class TaskNoteRepository {
 				`${p.vaultId}: "${generateUuid()}"`,
 				`${p.todoistProjectName}: "${escapeDoubleQuotes(projectName)}"`,
 				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
 				`${p.tags}: []`,
@@ -278,6 +280,7 @@ export class TaskNoteRepository {
 			// Always set IDs — these are critical for vault indexing
 			data[p.todoistProjectId] = projectId;
 			data[p.todoistProjectName] = projectName;
+			data[p.todoistUrl] = todoistUrl;
 			if (!data[p.created]) data[p.created] = formatCreatedDate(now);
 			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
 			if (!data[p.tags] || (Array.isArray(data[p.tags]) && (data[p.tags] as unknown[]).length === 0)) {

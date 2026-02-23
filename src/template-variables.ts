@@ -43,6 +43,7 @@ export interface TaskTemplateContext {
 export interface ProjectTemplateContext {
 	project_name: string;
 	project_id: string;
+	url?: string;
 	parent_project_link?: string;
 	parent_project_name?: string;
 }
@@ -129,6 +130,7 @@ export function resolveTemplateVars(
 		result = result
 			.replace(/\{\{project_name\}\}/g, pc.project_name ?? '')
 			.replace(/\{\{project_id\}\}/g, pc.project_id ?? '')
+			.replace(/\{\{url\}\}/g, pc.url ?? '')
 			.replace(/\{\{parent_project_link\}\}/g, pc.parent_project_link ?? '')
 			.replace(/\{\{parent_project_name\}\}/g, pc.parent_project_name ?? '');
 		return result;

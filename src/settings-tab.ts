@@ -512,7 +512,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 			new Setting(el)
 				.setName('Project note template')
-				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}. Note: parent variables are empty at creation time and are written to frontmatter by sync after all project notes exist.')
+				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{url}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}. Note: parent variables are empty at creation time and are written to frontmatter by sync after all project notes exist.')
 				.addTextArea((textArea) => {
 					textArea
 						.setPlaceholder('Leave empty to use default project note layout.')
@@ -595,7 +595,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		areaTemplateSetting = new Setting(el)
 			.setName('Area project note template')
-			.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}.')
+			.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{url}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}.')
 			.addTextArea((textArea) => {
 				textArea
 					.setPlaceholder('Leave empty to use default project note layout.')

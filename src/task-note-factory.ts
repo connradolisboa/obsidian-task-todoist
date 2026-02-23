@@ -168,6 +168,13 @@ export function buildTodoistUrl(todoistId: string, settings: TaskTodoistSettings
 	return `https://app.todoist.com/app/task/${todoistId}`;
 }
 
+export function buildTodoistProjectUrl(projectId: string, settings: TaskTodoistSettings): string {
+	if (settings.todoistLinkStyle === 'app') {
+		return `todoist://project?id=${projectId}`;
+	}
+	return `https://app.todoist.com/app/project/${projectId}`;
+}
+
 function buildTaskFolderPath(
 	resolvedBaseFolder: string,
 	settings: TaskTodoistSettings,
