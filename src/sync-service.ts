@@ -104,7 +104,7 @@ export class SyncService {
 			}
 
 			snapshot = await todoistClient.fetchSyncSnapshot();
-			const activeItemById = new Map(snapshot.items.map((item) => [item.id, item]));
+			const activeItemById = new Map<string, TodoistItem>(snapshot.items.map((item) => [item.id, item]));
 
 			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
 			const importableItems = filterImportableItems(
@@ -121,10 +121,10 @@ export class SyncService {
 
 			const existingSyncedTasks = await repository.listSyncedTasks();
 
-			const itemsToUpsertById = new Map(importableWithAncestors.map((item) => [item.id, item]));
+			const itemsToUpsertById = new Map(importableWithAncestors.filter((item) => !item.is_deleted).map((item) => [item.id, item]));
 			for (const entry of existingSyncedTasks) {
 				const remoteItem = activeItemById.get(entry.todoistId);
-				if (remoteItem) {
+				if (remoteItem && !remoteItem.is_deleted) {
 					itemsToUpsertById.set(remoteItem.id, remoteItem);
 				}
 			}
@@ -171,9 +171,12 @@ export class SyncService {
 
 function findMissingEntries(
 	existingSyncedTasks: SyncedTaskEntry[],
-	activeItemById: Map<string, unknown>,
+	activeItemById: Map<string, TodoistItem>,
 ): SyncedTaskEntry[] {
-	return existingSyncedTasks.filter((entry) => !activeItemById.has(entry.todoistId));
+	return existingSyncedTasks.filter((entry) => {
+		const remoteItem = activeItemById.get(entry.todoistId);
+		return !remoteItem || remoteItem.is_deleted;
+	});
 }
 
 function includeAncestorTasks(
