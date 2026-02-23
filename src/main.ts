@@ -450,11 +450,12 @@ export default class TaskTodoistPlugin extends Plugin {
 			if (!isDone) newDone = true;
 		} else if (statusLower === 'open') {
 			if (!isNotDone) newDone = false;
-		} else if (isDone) {
-			newStatus = 'Done';
-		} else if (isNotDone) {
-			newStatus = 'Open';
+		} else if (!statusLower) {
+			// task_status is absent — derive it from task_done
+			if (isDone) newStatus = 'Done';
+			else if (isNotDone) newStatus = 'Open';
 		}
+		// Custom status value: leave both fields alone
 
 		if (newDone === null && newStatus === null) return;
 

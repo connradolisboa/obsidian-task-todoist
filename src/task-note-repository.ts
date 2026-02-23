@@ -443,7 +443,7 @@ export class TaskNoteRepository {
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					setTaskStatus(data, 'done', this.settings, true);
+					setTaskStatus(data, 'done', this.settings);
 					data[p.todoistSyncStatus] = targetStatus;
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
@@ -468,7 +468,7 @@ export class TaskNoteRepository {
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					setTaskStatus(data, 'done', this.settings, true);
+					setTaskStatus(data, 'done', this.settings);
 					data[p.todoistSyncStatus] = targetStatus;
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
@@ -1091,7 +1091,7 @@ export class TaskNoteRepository {
 			// Remote wins (or no local changes): apply all remote fields.
 			touchModifiedDate(data, this.settings);
 			setTaskTitle(data, item.content, this.settings);
-			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings, true);
+			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
 			data[p.todoistPriority] = priority;
 			data[p.todoistPriorityLabel] = priorityLabel(priority);
 			data[p.todoistDue] = dueDate;
