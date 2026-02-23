@@ -512,7 +512,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 			new Setting(el)
 				.setName('Project note template')
-				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}. Note: parent variables are empty at creation time and are written to frontmatter by sync after all project notes exist.')
 				.addTextArea((textArea) => {
 					textArea
 						.setPlaceholder('Leave empty to use default project note layout.')
@@ -595,7 +595,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		areaTemplateSetting = new Setting(el)
 			.setName('Area project note template')
-			.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+			.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}.')
 			.addTextArea((textArea) => {
 				textArea
 					.setPlaceholder('Leave empty to use default project note layout.')
@@ -650,6 +650,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		this.addPropNameSetting(el, 'Todoist project link', 'Wikilink to the project note (e.g. [[Projects/My Project|My Project]]).', 'todoistProjectLink');
 		this.addPropNameSetting(el, 'Todoist section link', 'Wikilink to the section note (e.g. [[Projects/My Project/Section|Section]]).', 'todoistSectionLink');
+		this.addPropNameSetting(el, 'Parent project link', 'Wikilink to the parent project note, written on sub-project notes. Used by the {{parent_project_link}} template variable.', 'todoistParentProjectLink');
+		this.addPropNameSetting(el, 'Parent project name', 'Name of the parent project, written on sub-project notes. Used by the {{parent_project_name}} template variable.', 'todoistParentProjectName');
 		this.addPropNameSetting(el, 'Parent task', 'Property storing the wiki-link to a parent task.', 'parentTask');
 		this.addPropNameSetting(el, 'Todoist child tasks', 'Wiki-links to child task notes.', 'todoistChildTasks');
 		this.addPropNameSetting(el, 'Todoist has children', 'Whether this task has child tasks.', 'todoistHasChildren');

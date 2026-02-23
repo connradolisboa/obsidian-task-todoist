@@ -47,6 +47,8 @@ export interface PropNames {
 	// Wikilinks to project/section notes
 	todoistProjectLink: string;
 	todoistSectionLink: string;
+	todoistParentProjectLink: string;
+	todoistParentProjectName: string;
 	// Stable write-once vault UUID
 	vaultId: string;
 	// Idempotency guard for in-flight local creates
@@ -89,6 +91,8 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	sectionId: 'section_id',
 	todoistProjectLink: 'todoist_project_link',
 	todoistSectionLink: 'todoist_section_link',
+	todoistParentProjectLink: 'parent_project_link',
+	todoistParentProjectName: 'parent_project_name',
 	vaultId: 'vault_id',
 	todoistPendingId: 'todoist_pending_id',
 };

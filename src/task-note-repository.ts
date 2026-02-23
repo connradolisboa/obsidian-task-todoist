@@ -149,7 +149,7 @@ export class TaskNoteRepository {
 		await this.applyChildMetadata(combinedIndex, pendingParents);
 
 		if (this.settings.createProjectNotes && maps.projectParentIdById) {
-			await this.applyParentProjectLinks(projectFileById, maps.projectParentIdById);
+			await this.applyParentProjectLinks(projectFileById, maps.projectParentIdById, maps.projectNameById);
 		}
 
 		return { created, updated };
@@ -1183,7 +1183,12 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private async applyParentProjectLinks(projectFileById: Map<string, TFile>, projectParentIdById: Map<string, string | null>): Promise<void> {
+	private async applyParentProjectLinks(
+		projectFileById: Map<string, TFile>,
+		projectParentIdById: Map<string, string | null>,
+		projectNameById: Map<string, string>,
+	): Promise<void> {
+		const p = getPropNames(this.settings);
 		for (const [projectId, projectFile] of projectFileById) {
 			const parentId = projectParentIdById.get(projectId) ?? null;
 			if (!parentId) {
@@ -1194,13 +1199,16 @@ export class TaskNoteRepository {
 				continue;
 			}
 			const parentLink = toWikiLink(parentFile.path);
+			const parentName = projectNameById.get(parentId) ?? '';
 			const frontmatter = this.app.metadataCache.getFileCache(projectFile)?.frontmatter as Record<string, unknown> | undefined;
-			const existing = typeof frontmatter?.['parent_project_link'] === 'string' ? frontmatter['parent_project_link'] : '';
-			if (existing === parentLink) {
+			const existingLink = typeof frontmatter?.[p.todoistParentProjectLink] === 'string' ? frontmatter[p.todoistParentProjectLink] : '';
+			const existingName = typeof frontmatter?.[p.todoistParentProjectName] === 'string' ? frontmatter[p.todoistParentProjectName] : '';
+			if (existingLink === parentLink && existingName === parentName) {
 				continue;
 			}
 			await this.app.fileManager.processFrontMatter(projectFile, (fm) => {
-				(fm as Record<string, unknown>)['parent_project_link'] = parentLink;
+				(fm as Record<string, unknown>)[p.todoistParentProjectLink] = parentLink;
+				(fm as Record<string, unknown>)[p.todoistParentProjectName] = parentName;
 			});
 		}
 	}
