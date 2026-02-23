@@ -2,7 +2,7 @@ import { AbstractInputSuggest, App, Modal, Notice, Setting, TFile, TextComponent
 import type TaskTodoistPlugin from './main';
 import { formatDueForDisplay, parseInlineTaskDirectives } from './task-directives';
 import type { TodoistProject, TodoistSection } from './todoist-client';
-import { getTaskTitle } from './task-frontmatter';
+import { getTaskTitle, getPropNames } from './task-frontmatter';
 
 export class CreateTaskModal extends Modal {
 	private readonly plugin: TaskTodoistPlugin;
@@ -557,7 +557,8 @@ export class CreateTaskModal extends Modal {
 		if (!frontmatter) {
 			return true;
 		}
-		const parent = typeof frontmatter.parent_task === 'string' ? frontmatter.parent_task.trim() : '';
+		const p = getPropNames(this.plugin.settings);
+		const parent = typeof frontmatter[p.parentTask] === 'string' ? (frontmatter[p.parentTask] as string).trim() : '';
 		return parent.length === 0;
 	}
 }
