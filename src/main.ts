@@ -31,6 +31,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private scheduledSyncIntervalId: number | null = null;
 	private syncInProgress = false;
 	private syncQueued = false;
+	private readonly statusSyncBusy = new Set<string>();
 	private lookupCache: { expiresAt: number; value: TodoistProjectSectionLookup } | null = null;
 	private static readonly UNCHECKED_TASK_LINE_REGEX = /^(\s*[-*+]\s+\[\s\]\s+)(.+)$/;
 
@@ -40,6 +41,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		this.addSettingTab(new TaskTodoistSettingTab(this.app, this));
 		this.registerCommands();
 		this.registerVaultTaskDirtyTracking();
+		this.registerStatusBidiSync();
 		registerInlineTaskConverter(this);
 		this.registerEditorExtension(createTaskConvertOverlayExtension(this));
 		this.configureScheduledSync();
@@ -415,6 +417,56 @@ export default class TaskTodoistPlugin extends Plugin {
 		if (this.syncQueued) {
 			this.syncQueued = false;
 			void this.runImportSync();
+		}
+	}
+
+	private registerStatusBidiSync(): void {
+		this.registerEvent(this.app.metadataCache.on('changed', (file) => {
+			void this.onMetadataCacheChanged(file);
+		}));
+	}
+
+	private async onMetadataCacheChanged(file: TFile): Promise<void> {
+		if (!this.isTaskFilePath(file.path)) return;
+		if (this.statusSyncBusy.has(file.path)) return;
+		if (this.syncInProgress) return;
+
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!frontmatter) return;
+
+		const p = getPropNames(this.settings);
+		const rawStatus = typeof frontmatter[p.taskStatus] === 'string'
+			? (frontmatter[p.taskStatus] as string).trim()
+			: null;
+		const statusLower = rawStatus?.toLowerCase() ?? null;
+		const rawDone = frontmatter[p.taskDone];
+		const isDone = rawDone === true || rawDone === 'true';
+		const isNotDone = rawDone === false || rawDone === 'false';
+
+		let newDone: boolean | null = null;
+		let newStatus: string | null = null;
+
+		if (statusLower === 'done') {
+			if (!isDone) newDone = true;
+		} else if (statusLower === 'open') {
+			if (!isNotDone) newDone = false;
+		} else if (isDone) {
+			newStatus = 'Done';
+		} else if (isNotDone) {
+			newStatus = 'Open';
+		}
+
+		if (newDone === null && newStatus === null) return;
+
+		this.statusSyncBusy.add(file.path);
+		try {
+			await this.app.fileManager.processFrontMatter(file, (fm) => {
+				const data = fm as Record<string, unknown>;
+				if (newDone !== null) data[p.taskDone] = newDone;
+				if (newStatus !== null) data[p.taskStatus] = newStatus;
+			});
+		} finally {
+			setTimeout(() => this.statusSyncBusy.delete(file.path), 500);
 		}
 	}
 
