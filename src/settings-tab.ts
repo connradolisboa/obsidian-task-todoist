@@ -575,6 +575,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(el).setName('Area projects').setHeading();
 
+		let areaTemplateSetting: Setting;
+
 		new Setting(el)
 			.setName('Area project names')
 			.setDesc('Comma-separated project names treated as "areas". These use the area note template instead of the standard project note template.')
@@ -585,29 +587,29 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.areaProjectNames = value;
 						await this.plugin.saveSettings();
-						this.display();
+						areaTemplateSetting.settingEl.style.display = value.trim() ? '' : 'none';
 					});
 				textArea.inputEl.rows = 2;
 				textArea.inputEl.cols = 36;
 			});
 
-		if (this.plugin.settings.areaProjectNames.trim()) {
-			new Setting(el)
-				.setName('Area project note template')
-				.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
-				.addTextArea((textArea) => {
-					textArea
-						.setPlaceholder('Leave empty to use default project note layout.')
-						.setValue(this.plugin.settings.areaProjectNoteTemplate)
-						.onChange(async (value) => {
-							this.plugin.settings.areaProjectNoteTemplate = value;
-							await this.plugin.saveSettings();
-						});
-					textArea.inputEl.rows = 6;
-					textArea.inputEl.cols = 50;
-					textArea.inputEl.style.fontFamily = 'monospace';
-				});
-		}
+		areaTemplateSetting = new Setting(el)
+			.setName('Area project note template')
+			.setDesc('Full-file template for area project notes. Available variables: {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Leave empty to use default project note layout.')
+					.setValue(this.plugin.settings.areaProjectNoteTemplate)
+					.onChange(async (value) => {
+						this.plugin.settings.areaProjectNoteTemplate = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 6;
+				textArea.inputEl.cols = 50;
+				textArea.inputEl.style.fontFamily = 'monospace';
+			});
+		areaTemplateSetting.settingEl.style.display =
+			this.plugin.settings.areaProjectNames.trim() ? '' : 'none';
 	}
 
 	// ── Properties ─────────────────────────────────────────────────────────────
