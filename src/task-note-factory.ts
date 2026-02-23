@@ -106,6 +106,9 @@ export async function createLocalTaskNote(
 			data[p.todoistDeadline] = deadlineDate || null;
 			data[p.todoistDescription] = description;
 			data[p.todoistUrl] = todoistUrl;
+			// Project/section links: empty for locally created notes (set by sync when the task is imported)
+			if (!data[p.todoistProjectLink]) data[p.todoistProjectLink] = '';
+			if (!data[p.todoistSectionLink]) data[p.todoistSectionLink] = '';
 			data[p.todoistSyncStatus] = input.todoistSync ? 'queued_local_create' : 'local_only';
 			data[p.localUpdatedAt] = new Date().toISOString();
 		});
@@ -137,6 +140,8 @@ export async function createLocalTaskNote(
 		deadlineDate ? `${p.todoistDeadline}: "${escapeDoubleQuotes(deadlineDate)}"` : `${p.todoistDeadline}: null`,
 		`${p.todoistDescription}: "${escapeDoubleQuotes(description)}"`,
 		todoistUrl ? `${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"` : `${p.todoistUrl}: ""`,
+		`${p.todoistProjectLink}: ""`,
+		`${p.todoistSectionLink}: ""`,
 		`${p.todoistSyncStatus}: "${input.todoistSync ? 'queued_local_create' : 'local_only'}"`,
 		`${p.localUpdatedAt}: "${new Date().toISOString()}"`,
 		'---',

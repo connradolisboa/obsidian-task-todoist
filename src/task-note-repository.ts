@@ -120,7 +120,7 @@ export class TaskNoteRepository {
 					projectFileById.set(item.project_id, projectFile);
 				}
 			}
-			if (this.settings.createSectionNotes && this.settings.useProjectSubfolders && item.section_id && !seenSectionIds.has(item.section_id)) {
+			if (this.settings.createSectionNotes && (this.settings.useProjectSubfolders || !!this.settings.sectionNotesFolderPath?.trim()) && item.section_id && !seenSectionIds.has(item.section_id)) {
 				seenSectionIds.add(item.section_id);
 				const sectionName = maps.sectionNameById.get(item.section_id) ?? 'Unknown';
 				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
@@ -169,12 +169,16 @@ export class TaskNoteRepository {
 		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		if (!fm) return;
 
-		const cachedName = typeof fm['project_name'] === 'string' ? (fm['project_name'] as string) : null;
+		const p = getPropNames(this.settings);
+		// Read with backward-compat: old notes used hardcoded 'project_name' key
+		const cachedName =
+			typeof fm[p.todoistProjectName] === 'string' ? (fm[p.todoistProjectName] as string) :
+			(typeof fm['project_name'] === 'string' ? (fm['project_name'] as string) : null);
 		if (!cachedName || cachedName === projectName) return;
 
-		// Update project_name in frontmatter
+		// Update using configurable property name
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			frontmatter['project_name'] = projectName;
+			frontmatter[p.todoistProjectName] = projectName;
 		});
 
 		const oldSanitized = sanitizeFileName(cachedName) || projectId;
@@ -255,7 +259,7 @@ export class TaskNoteRepository {
 			content = [
 				'---',
 				`${p.vaultId}: "${generateUuid()}"`,
-				`project_name: "${escapeDoubleQuotes(projectName)}"`,
+				`${p.todoistProjectName}: "${escapeDoubleQuotes(projectName)}"`,
 				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
@@ -265,6 +269,21 @@ export class TaskNoteRepository {
 			].join('\n');
 		}
 		const file = await this.app.vault.create(filePath, content);
+		// Always hydrate required frontmatter after creation. When a template is used, the
+		// template may omit IDs or use different property names — hydration guarantees the
+		// vault index can always find this note and rename detection works correctly.
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+			if (!data[p.vaultId]) data[p.vaultId] = generateUuid();
+			// Always set IDs — these are critical for vault indexing
+			data[p.todoistProjectId] = projectId;
+			data[p.todoistProjectName] = projectName;
+			if (!data[p.created]) data[p.created] = formatCreatedDate(now);
+			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
+			if (!data[p.tags] || (Array.isArray(data[p.tags]) && (data[p.tags] as unknown[]).length === 0)) {
+				data[p.tags] = [];
+			}
+		});
 		projectIndex.set(projectId, file);
 		return file;
 	}
@@ -278,7 +297,10 @@ export class TaskNoteRepository {
 		if (!fm) return;
 
 		const p = getPropNames(this.settings);
-		const cachedSectionName = typeof fm['section_name'] === 'string' ? (fm['section_name'] as string) : null;
+		// Read with backward-compat: old notes used hardcoded 'section_name' key
+		const cachedSectionName =
+			typeof fm[p.todoistSectionName] === 'string' ? (fm[p.todoistSectionName] as string) :
+			(typeof fm['section_name'] === 'string' ? (fm['section_name'] as string) : null);
 		const cachedProjectLink = typeof fm[p.todoistProjectLink] === 'string' ? (fm[p.todoistProjectLink] as string) : null;
 
 		const currentProjectLink = projectFile ? toWikiLink(projectFile.path) : '';
@@ -288,7 +310,7 @@ export class TaskNoteRepository {
 		if (!sectionNameStale && !projectLinkStale) return;
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			if (sectionNameStale) frontmatter['section_name'] = sectionName;
+			if (sectionNameStale) frontmatter[p.todoistSectionName] = sectionName;
 			if (projectLinkStale) frontmatter[p.todoistProjectLink] = currentProjectLink;
 		});
 
@@ -370,9 +392,9 @@ export class TaskNoteRepository {
 			content = [
 				'---',
 				`${p.vaultId}: "${generateUuid()}"`,
-				`section_name: "${escapeDoubleQuotes(sectionName)}"`,
+				`${p.todoistSectionName}: "${escapeDoubleQuotes(sectionName)}"`,
 				`${p.todoistSectionId}: "${escapeDoubleQuotes(sectionId)}"`,
-				`project_name: "${escapeDoubleQuotes(projectName)}"`,
+				`${p.todoistProjectName}: "${escapeDoubleQuotes(projectName)}"`,
 				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
 				`${p.todoistProjectLink}: "${escapeDoubleQuotes(projectLink)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
@@ -383,6 +405,24 @@ export class TaskNoteRepository {
 			].join('\n');
 		}
 		const file = await this.app.vault.create(filePath, content);
+		// Always hydrate required frontmatter after creation. When a template is used, the
+		// template may omit IDs or use different property names — hydration guarantees the
+		// vault index can always find this note and links are set correctly.
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+			if (!data[p.vaultId]) data[p.vaultId] = generateUuid();
+			// Always set IDs and link — critical for vault indexing and task→section linking
+			data[p.todoistSectionId] = sectionId;
+			data[p.todoistSectionName] = sectionName;
+			data[p.todoistProjectId] = projectId;
+			data[p.todoistProjectName] = projectName;
+			data[p.todoistProjectLink] = projectLink;
+			if (!data[p.created]) data[p.created] = formatCreatedDate(now);
+			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
+			if (!data[p.tags] || (Array.isArray(data[p.tags]) && (data[p.tags] as unknown[]).length === 0)) {
+				data[p.tags] = [];
+			}
+		});
 		sectionIndex.set(sectionId, file);
 	}
 
@@ -1269,19 +1309,27 @@ export class TaskNoteRepository {
 			// Project/section indexes: only index project/section notes (not task notes).
 			// Task notes have todoist_id set; project and section notes never do.
 			// Backward-compat dual-read: old notes use 'project_id'/'section_id' keys.
+			//
+			// IMPORTANT: A note with a section ID is a section note — index it ONLY in
+			// sectionIndex, even if it also has a project ID. Without this guard, section
+			// notes (which store todoist_project_id for the parent project link) would also
+			// appear in projectIndex, causing tasks to link to section notes instead of
+			// their parent project notes ("sections linked in place of projects").
 			if (!taskId) {
-				const rawProjectId =
-					fm[p.todoistProjectId] ??
-					(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
-				if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
-					projectIndex.set(rawProjectId.trim(), file);
-				}
-
 				const rawSectionId =
 					fm[p.todoistSectionId] ??
 					(p.todoistSectionId !== 'section_id' ? fm['section_id'] : undefined);
 				if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
+					// Section note — only add to section index
 					sectionIndex.set(rawSectionId.trim(), file);
+				} else {
+					// No section ID — may be a project note
+					const rawProjectId =
+						fm[p.todoistProjectId] ??
+						(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
+					if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
+						projectIndex.set(rawProjectId.trim(), file);
+					}
 				}
 			}
 
