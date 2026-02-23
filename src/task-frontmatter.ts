@@ -88,8 +88,22 @@ export function setTaskStatus(
 	frontmatter: Record<string, unknown>,
 	status: 'open' | 'done',
 	settings: TaskTodoistSettings,
+	preserveCustom = false,
 ): void {
 	const p = getPropNames(settings);
+
+	if (preserveCustom) {
+		const currentStatus = typeof frontmatter[p.taskStatus] === 'string'
+			? (frontmatter[p.taskStatus] as string).trim().toLowerCase()
+			: '';
+		const isCustomStatus = currentStatus !== '' && currentStatus !== 'done' && currentStatus !== 'open';
+		if (isCustomStatus) {
+			// Only update task_done; leave task_status untouched
+			frontmatter[p.taskDone] = status === 'done';
+			return;
+		}
+	}
+
 	frontmatter[p.taskStatus] = status === 'done' ? 'Done' : 'Open';
 	frontmatter[p.taskDone] = status === 'done';
 	// Remove legacy keys if present
