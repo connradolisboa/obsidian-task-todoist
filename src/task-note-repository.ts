@@ -430,12 +430,13 @@ export class TaskNoteRepository {
 		}
 
 		if (mode === 'none') {
-				if (currentSyncStatus === 'missing_remote') {
+				if (currentSyncStatus === 'missing_remote' && currentTaskStatus === 'done') {
 					continue;
 				}
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
+					setTaskStatus(data, 'done', this.settings);
 					data[p.todoistSyncStatus] = 'missing_remote';
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
