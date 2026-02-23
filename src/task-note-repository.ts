@@ -250,7 +250,7 @@ export class TaskNoteRepository {
 				'---',
 				`${p.vaultId}: "${generateUuid()}"`,
 				`project_name: "${escapeDoubleQuotes(projectName)}"`,
-				`${p.projectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
 				`${p.tags}: []`,
@@ -365,9 +365,9 @@ export class TaskNoteRepository {
 				'---',
 				`${p.vaultId}: "${generateUuid()}"`,
 				`section_name: "${escapeDoubleQuotes(sectionName)}"`,
-				`${p.sectionId}: "${escapeDoubleQuotes(sectionId)}"`,
+				`${p.todoistSectionId}: "${escapeDoubleQuotes(sectionId)}"`,
 				`project_name: "${escapeDoubleQuotes(projectName)}"`,
-				`${p.projectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
 				`${p.todoistProjectLink}: "${escapeDoubleQuotes(projectLink)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
@@ -1249,16 +1249,23 @@ export class TaskNoteRepository {
 				}
 			}
 
-			// Project index: by project_id frontmatter (PropNames-aware with backward-compat dual-read)
-			const rawProjectId = fm[p.projectId] ?? (p.projectId !== 'project_id' ? fm['project_id'] : undefined);
-			if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
-				projectIndex.set(rawProjectId.trim(), file);
-			}
+			// Project/section indexes: only index project/section notes (not task notes).
+			// Task notes have todoist_id set; project and section notes never do.
+			// Backward-compat dual-read: old notes use 'project_id'/'section_id' keys.
+			if (!taskId) {
+				const rawProjectId =
+					fm[p.todoistProjectId] ??
+					(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
+				if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
+					projectIndex.set(rawProjectId.trim(), file);
+				}
 
-			// Section index: by section_id frontmatter (PropNames-aware with backward-compat dual-read)
-			const rawSectionId = fm[p.sectionId] ?? (p.sectionId !== 'section_id' ? fm['section_id'] : undefined);
-			if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
-				sectionIndex.set(rawSectionId.trim(), file);
+				const rawSectionId =
+					fm[p.todoistSectionId] ??
+					(p.todoistSectionId !== 'section_id' ? fm['section_id'] : undefined);
+				if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
+					sectionIndex.set(rawSectionId.trim(), file);
+				}
 			}
 
 			// Vault ID index: by vault_id frontmatter
@@ -1283,9 +1290,13 @@ export class TaskNoteRepository {
 			// Skip notes with no plugin ID — not managed by this plugin
 			const hasTodoistId = (typeof fm[p.todoistId] === 'string' && (fm[p.todoistId] as string).trim())
 				|| typeof fm[p.todoistId] === 'number';
-			const rawProjectId = fm[p.projectId] ?? (p.projectId !== 'project_id' ? fm['project_id'] : undefined);
+			const rawProjectId =
+				fm[p.todoistProjectId] ??
+				(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
 			const hasProjectId = typeof rawProjectId === 'string' && rawProjectId.trim();
-			const rawSectionId = fm[p.sectionId] ?? (p.sectionId !== 'section_id' ? fm['section_id'] : undefined);
+			const rawSectionId =
+				fm[p.todoistSectionId] ??
+				(p.todoistSectionId !== 'section_id' ? fm['section_id'] : undefined);
 			const hasSectionId = typeof rawSectionId === 'string' && rawSectionId.trim();
 			if (!hasTodoistId && !hasProjectId && !hasSectionId) {
 				continue;

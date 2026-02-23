@@ -41,9 +41,6 @@ export interface PropNames {
 	// Human-readable labels and additional Todoist properties
 	todoistPriorityLabel: string;
 	todoistDeadline: string;
-	// Project & section note properties
-	projectId: string;
-	sectionId: string;
 	// Wikilinks to project/section notes
 	todoistProjectLink: string;
 	todoistSectionLink: string;
@@ -87,8 +84,6 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistUrl: 'todoist_url',
 	todoistPriorityLabel: 'task_priority_label',
 	todoistDeadline: 'todoist_deadline',
-	projectId: 'project_id',
-	sectionId: 'section_id',
 	todoistProjectLink: 'todoist_project_link',
 	todoistSectionLink: 'todoist_section_link',
 	todoistParentProjectLink: 'parent_project_link',

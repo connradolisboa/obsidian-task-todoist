@@ -663,10 +663,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
 		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
 		this.addPropNameSetting(el, 'Todoist ID', 'The remote Todoist task ID.', 'todoistId');
-		this.addPropNameSetting(el, 'Todoist project ID', 'The remote Todoist project ID.', 'todoistProjectId');
-		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID.', 'todoistSectionId');
-		this.addPropNameSetting(el, 'Project ID', 'Frontmatter key written into project notes to track the Todoist project ID.', 'projectId');
-		this.addPropNameSetting(el, 'Section ID', 'Frontmatter key written into section notes to track the Todoist section ID.', 'sectionId');
+		this.addPropNameSetting(el, 'Todoist project ID', 'The remote Todoist project ID. Also used on project notes to identify which project they represent.', 'todoistProjectId');
+		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID. Also used on section notes to identify which section they represent.', 'todoistSectionId');
 		this.addPropNameSetting(el, 'Todoist parent ID', 'The Todoist ID of the parent task.', 'todoistParentId');
 		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
 
