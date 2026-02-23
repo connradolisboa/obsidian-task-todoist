@@ -53,6 +53,7 @@ export interface SectionTemplateContext {
 	section_id: string;
 	project_name: string;
 	project_id: string;
+	url?: string;
 	project_link?: string;
 }
 
@@ -120,6 +121,7 @@ export function resolveTemplateVars(
 			.replace(/\{\{section_id\}\}/g, sc.section_id ?? '')
 			.replace(/\{\{project_name\}\}/g, sc.project_name ?? '')
 			.replace(/\{\{project_id\}\}/g, sc.project_id ?? '')
+			.replace(/\{\{url\}\}/g, sc.url ?? '')
 			.replace(/\{\{project_link\}\}/g, sc.project_link ?? '');
 		return result;
 	}

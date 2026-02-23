@@ -558,7 +558,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 			new Setting(el)
 				.setName('Section note template')
-				.setDesc('Full-file template for section notes. Available variables: {{section_name}}, {{section_id}}, {{project_name}}, {{project_id}}, {{YYYY}}, {{MM}}, {{DD}}.')
+				.setDesc('Full-file template for section notes. Available variables: {{section_name}}, {{section_id}}, {{project_name}}, {{project_id}}, {{url}}, {{project_link}}, {{YYYY}}, {{MM}}, {{DD}}.')
 				.addTextArea((textArea) => {
 					textArea
 						.setPlaceholder('Leave empty to use default section note layout.')

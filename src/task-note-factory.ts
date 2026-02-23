@@ -175,6 +175,11 @@ export function buildTodoistProjectUrl(projectId: string, settings: TaskTodoistS
 	return `https://app.todoist.com/app/project/${projectId}`;
 }
 
+/** Sections don't have standalone Todoist URLs — links point to the containing project. */
+export function buildTodoistSectionUrl(projectId: string, settings: TaskTodoistSettings): string {
+	return buildTodoistProjectUrl(projectId, settings);
+}
+
 function buildTaskFolderPath(
 	resolvedBaseFolder: string,
 	settings: TaskTodoistSettings,

@@ -15,7 +15,7 @@ import {
 	setTaskTitle,
 	touchModifiedDate,
 } from './task-frontmatter';
-import { buildTodoistUrl, buildTodoistProjectUrl, sanitizeFileName } from './task-note-factory';
+import { buildTodoistUrl, buildTodoistProjectUrl, buildTodoistSectionUrl, sanitizeFileName } from './task-note-factory';
 import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
 
 interface ProjectSectionMaps {
@@ -381,11 +381,13 @@ export class TaskNoteRepository {
 		}
 
 		const projectLink = projectFile ? toWikiLink(projectFile.path) : '';
+		const todoistUrl = buildTodoistSectionUrl(projectId, this.settings);
 		const context: SectionTemplateContext = {
 			section_name: sectionName,
 			section_id: sectionId,
 			project_name: projectName,
 			project_id: projectId,
+			url: todoistUrl,
 			project_link: projectLink,
 		};
 		let content: string;
@@ -399,6 +401,7 @@ export class TaskNoteRepository {
 				`${p.todoistSectionId}: "${escapeDoubleQuotes(sectionId)}"`,
 				`${p.todoistProjectName}: "${escapeDoubleQuotes(projectName)}"`,
 				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
+				`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 				`${p.todoistProjectLink}: "${escapeDoubleQuotes(projectLink)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
@@ -419,6 +422,7 @@ export class TaskNoteRepository {
 			data[p.todoistSectionName] = sectionName;
 			data[p.todoistProjectId] = projectId;
 			data[p.todoistProjectName] = projectName;
+			data[p.todoistUrl] = todoistUrl;
 			data[p.todoistProjectLink] = projectLink;
 			if (!data[p.created]) data[p.created] = formatCreatedDate(now);
 			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
