@@ -1,4 +1,4 @@
-import { TaskNoteRepository, type SyncedTaskEntry } from './task-note-repository';
+import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry } from './task-note-repository';
 import type { TaskTodoistSettings } from './settings';
 import { filterImportableItems } from './import-rules';
 import { TodoistClient } from './todoist-client';
@@ -172,11 +172,15 @@ export class SyncService {
 function findMissingEntries(
 	existingSyncedTasks: SyncedTaskEntry[],
 	activeItemById: Map<string, TodoistItem>,
-): SyncedTaskEntry[] {
-	return existingSyncedTasks.filter((entry) => {
+): MissingTaskEntry[] {
+	const result: MissingTaskEntry[] = [];
+	for (const entry of existingSyncedTasks) {
 		const remoteItem = activeItemById.get(entry.todoistId);
-		return !remoteItem || remoteItem.is_deleted;
-	});
+		if (!remoteItem || remoteItem.is_deleted) {
+			result.push({ ...entry, isDeletedRemote: Boolean(remoteItem?.is_deleted) });
+		}
+	}
+	return result;
 }
 
 function includeAncestorTasks(

@@ -41,6 +41,12 @@ export interface SyncedTaskEntry {
 	file: TFile;
 }
 
+export interface MissingTaskEntry {
+	todoistId: string;
+	file: TFile;
+	isDeletedRemote: boolean;
+}
+
 interface ParentAssignment {
 	childTodoistId: string;
 	parentTodoistId: string;
@@ -409,7 +415,7 @@ export class TaskNoteRepository {
 		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
-	async applyMissingRemoteTasks(missingEntries: SyncedTaskEntry[], mode: ArchiveMode): Promise<number> {
+	async applyMissingRemoteTasks(missingEntries: MissingTaskEntry[], mode: ArchiveMode): Promise<number> {
 		let changed = 0;
 		const resolvedArchive = resolveTemplateVars(this.settings.archiveFolderPath);
 		const archivePrefix = `${normalizePath(resolvedArchive)}/`;
@@ -424,20 +430,21 @@ export class TaskNoteRepository {
 			const currentTaskStatus = cachedFrontmatter ? getTaskStatus(cachedFrontmatter, this.settings) : 'open';
 
 			if (mode === 'delete-file') {
-			await this.app.vault.trash(entry.file, false);
-			changed += 1;
-			continue;
-		}
+				await this.app.vault.trash(entry.file, false);
+				changed += 1;
+				continue;
+			}
 
-		if (mode === 'none') {
-				if (currentSyncStatus === 'missing_remote' && currentTaskStatus === 'done') {
+			if (mode === 'none') {
+				const targetStatus = entry.isDeletedRemote ? 'deleted_remote' : 'missing_remote';
+				if (currentSyncStatus === targetStatus && currentTaskStatus === 'done') {
 					continue;
 				}
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
 					setTaskStatus(data, 'done', this.settings);
-					data[p.todoistSyncStatus] = 'missing_remote';
+					data[p.todoistSyncStatus] = targetStatus;
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
 				changed += 1;
@@ -445,7 +452,11 @@ export class TaskNoteRepository {
 			}
 
 			const alreadyArchived = entry.file.path.startsWith(archivePrefix);
-			const targetStatus = mode === 'move-to-archive-folder' ? 'archived_remote' : 'completed_remote';
+			const targetStatus = entry.isDeletedRemote
+				? 'deleted_remote'
+				: mode === 'move-to-archive-folder'
+					? 'archived_remote'
+					: 'completed_remote';
 			const needsFrontmatterUpdate = currentTaskStatus !== 'done' || currentSyncStatus !== targetStatus;
 			const needsArchiveMove = mode === 'move-to-archive-folder' && !alreadyArchived;
 
