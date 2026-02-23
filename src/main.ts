@@ -540,7 +540,12 @@ export default class TaskTodoistPlugin extends Plugin {
 			typeof frontmatter[p.todoistSyncStatus] === 'string'
 				? frontmatter[p.todoistSyncStatus] as string
 				: (typeof frontmatter.sync_status === 'string' ? frontmatter.sync_status : '');
-		if (currentStatus === 'dirty_local' || currentStatus === 'queued_local_create') {
+		if (
+			currentStatus === 'dirty_local' ||
+			currentStatus === 'queued_local_create' ||
+			currentStatus === 'deleted_remote' ||
+			currentStatus === 'missing_remote'
+		) {
 			return;
 		}
 

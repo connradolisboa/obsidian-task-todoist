@@ -1073,6 +1073,11 @@ export class TaskNoteRepository {
 			data[p.todoistSectionLink] = sectionLink;
 			data[p.todoistLabels] = item.labels ?? [];
 			data[p.todoistParentId] = item.parent_id ?? '';
+			// Clear the parent wiki-link when the task no longer has a parent;
+			// applyParentLinks will re-set it for tasks that still have one.
+			if (!item.parent_id) {
+				data[p.parentTask] = '';
+			}
 			data[p.todoistUrl] = buildTodoistUrl(item.id, this.settings);
 			// Clear any pending ID guard — recovery path when import catches the task
 			// before markLocalCreateSynced() ran after a crashed sync.

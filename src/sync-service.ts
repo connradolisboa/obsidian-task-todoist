@@ -177,7 +177,10 @@ function findMissingEntries(
 	for (const entry of existingSyncedTasks) {
 		const remoteItem = activeItemById.get(entry.todoistId);
 		if (!remoteItem || remoteItem.is_deleted) {
-			result.push({ ...entry, isDeletedRemote: Boolean(remoteItem?.is_deleted) });
+			// The sync always uses sync_token='*' (full sync), so deleted tasks are
+			// simply absent from the response rather than returned with is_deleted:true.
+			// Any task missing from the full snapshot is definitively deleted on Todoist.
+			result.push({ ...entry, isDeletedRemote: !remoteItem || Boolean(remoteItem.is_deleted) });
 		}
 	}
 	return result;
