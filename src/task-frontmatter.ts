@@ -25,9 +25,7 @@ export function applyStandardTaskFrontmatter(
 	}
 	frontmatter[p.tags] = existingTags;
 
-	if (!Array.isArray(frontmatter[p.links])) {
-		frontmatter[p.links] = [];
-	}
+
 }
 
 export function touchModifiedDate(frontmatter: Record<string, unknown>, settings: TaskTodoistSettings): void {

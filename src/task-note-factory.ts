@@ -84,7 +84,6 @@ export async function createLocalTaskNote(
 			if (!existingTags || (Array.isArray(existingTags) && (existingTags as unknown[]).length === 0)) {
 				data[p.tags] = defaultTag ? [defaultTag] : ['tasks'];
 			}
-			if (!data[p.links]) data[p.links] = [];
 			// Task fields: always set
 			data[p.taskTitle] = input.title;
 			data[p.taskStatus] = 'Open';
@@ -122,7 +121,6 @@ export async function createLocalTaskNote(
 		`${p.modified}: "${formatModifiedDate(now)}"`,
 		`${p.tags}:`,
 		defaultTag ? `  - ${defaultTag}` : '  - tasks',
-		`${p.links}: []`,
 		`${p.taskTitle}: "${escapeDoubleQuotes(input.title)}"`,
 		input.parentTaskLink?.trim() ? `${p.parentTask}: "${escapeDoubleQuotes(input.parentTaskLink.trim())}"` : null,
 		`${p.todoistSync}: ${input.todoistSync ? 'true' : 'false'}`,

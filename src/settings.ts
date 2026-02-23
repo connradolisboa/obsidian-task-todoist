@@ -13,7 +13,6 @@ export interface PropNames {
 	created: string;
 	modified: string;
 	tags: string;
-	links: string;
 	parentTask: string;
 	localUpdatedAt: string;
 	// Todoist sync properties
@@ -61,7 +60,6 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	created: 'created',
 	modified: 'modified',
 	tags: 'tags',
-	links: 'links',
 	parentTask: 'parent_task',
 	localUpdatedAt: 'local_updated_at',
 	todoistSync: 'todoist_sync',

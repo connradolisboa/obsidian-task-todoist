@@ -254,7 +254,6 @@ export class TaskNoteRepository {
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
 				`${p.tags}: []`,
-				`${p.links}: []`,
 				'---',
 				'',
 			].join('\n');
@@ -373,7 +372,6 @@ export class TaskNoteRepository {
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
 				`${p.tags}: []`,
-				`${p.links}: []`,
 				'---',
 				'',
 			].join('\n');
@@ -962,7 +960,6 @@ export class TaskNoteRepository {
 			if (!existingTags || (Array.isArray(existingTags) && (existingTags as unknown[]).length === 0)) {
 				data[p.tags] = [defaultTag];
 			}
-			if (!data[p.links]) data[p.links] = [];
 
 			// Task fields: always set to reflect Todoist truth
 			setTaskTitle(data, item.content, this.settings);
@@ -1460,7 +1457,6 @@ function buildNewFileContent(
 		`${p.modified}: "${formatModifiedDate(now)}"`,
 		`${p.tags}:`,
 		`  - ${defaultTag}`,
-		`${p.links}: []`,
 		`${p.taskTitle}: ${toQuotedYaml(item.content)}`,
 		`${p.todoistSync}: true`,
 		`${p.todoistSyncStatus}: "synced"`,

@@ -622,59 +622,58 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(el).setName('Core task properties').setHeading();
 
-		this.addPropNameSetting(el, 'Task title', 'Property storing the task title.', 'taskTitle');
-		this.addPropNameSetting(el, 'Task status', 'Property storing open/done status string.', 'taskStatus');
-		this.addPropNameSetting(el, 'Task done (boolean)', 'Boolean property for done state (Bases compatibility).', 'taskDone');
 		this.addPropNameSetting(el, 'Created date', 'Property storing the note creation date.', 'created');
 		this.addPropNameSetting(el, 'Modified date', 'Property storing the last modified timestamp.', 'modified');
 		this.addPropNameSetting(el, 'Tags', 'Property storing note tags.', 'tags');
-		this.addPropNameSetting(el, 'Links', 'Property storing related links.', 'links');
-		this.addPropNameSetting(el, 'Parent task', 'Property storing the wiki-link to a parent task.', 'parentTask');
-		this.addPropNameSetting(el, 'Local updated at', 'Property storing when local changes were last made.', 'localUpdatedAt');
+		this.addPropNameSetting(el, 'Task title', 'Property storing the task title.', 'taskTitle');
+		this.addPropNameSetting(el, 'Task status', 'Property storing open/done status string.', 'taskStatus');
+		this.addPropNameSetting(el, 'Task done (boolean)', 'Boolean property for done state (Bases compatibility).', 'taskDone');
 
-		new Setting(el).setName('Todoist sync properties').setHeading();
+		new Setting(el).setName('Todoist task details').setHeading();
 
-		this.addPropNameSetting(el, 'Todoist sync', 'Whether this note is synced with Todoist.', 'todoistSync');
-		this.addPropNameSetting(el, 'Todoist sync status', 'Internal sync state (synced, dirty_local, etc.).', 'todoistSyncStatus');
-		this.addPropNameSetting(el, 'Todoist ID', 'The remote Todoist task ID.', 'todoistId');
-		this.addPropNameSetting(el, 'Todoist project ID', 'The remote Todoist project ID.', 'todoistProjectId');
-		this.addPropNameSetting(el, 'Todoist project name', 'Human-readable Todoist project name.', 'todoistProjectName');
-		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID.', 'todoistSectionId');
-		this.addPropNameSetting(el, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
-		this.addPropNameSetting(el, 'Todoist project link', 'Wikilink to the project note (e.g. [[Projects/My Project|My Project]]).', 'todoistProjectLink');
-		this.addPropNameSetting(el, 'Todoist section link', 'Wikilink to the section note (e.g. [[Projects/My Project/Section|Section]]).', 'todoistSectionLink');
+		this.addPropNameSetting(el, 'Todoist labels', 'Array of labels applied in Todoist.', 'todoistLabels');
+		this.addPropNameSetting(el, 'Todoist description', 'Stores the Todoist task description. The note body is your personal notes and is not synced.', 'todoistDescription');
+		this.addPropNameSetting(el, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting).', 'todoistUrl');
 		this.addPropNameSetting(el, 'Todoist priority', 'Task priority (1–4).', 'todoistPriority');
+		this.addPropNameSetting(el, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
+
+		new Setting(el).setName('Due dates & recurrence').setHeading();
+
+		this.addPropNameSetting(el, 'Deadline date', 'Hard deadline from Todoist (separate from due date).', 'todoistDeadline');
 		this.addPropNameSetting(el, 'Todoist due date', 'ISO due date from Todoist.', 'todoistDue');
 		this.addPropNameSetting(el, 'Todoist due string', 'Natural language recurrence string from Todoist.', 'todoistDueString');
 		this.addPropNameSetting(el, 'Todoist is recurring', 'Whether the task is a recurring task.', 'todoistIsRecurring');
-		this.addPropNameSetting(el, 'Todoist labels', 'Array of labels applied in Todoist.', 'todoistLabels');
-		this.addPropNameSetting(el, 'Todoist parent ID', 'The Todoist ID of the parent task.', 'todoistParentId');
+
+		new Setting(el).setName('Task relationships').setHeading();
+
+		this.addPropNameSetting(el, 'Todoist project link', 'Wikilink to the project note (e.g. [[Projects/My Project|My Project]]).', 'todoistProjectLink');
+		this.addPropNameSetting(el, 'Todoist section link', 'Wikilink to the section note (e.g. [[Projects/My Project/Section|Section]]).', 'todoistSectionLink');
+		this.addPropNameSetting(el, 'Parent task', 'Property storing the wiki-link to a parent task.', 'parentTask');
+		this.addPropNameSetting(el, 'Todoist child tasks', 'Wiki-links to child task notes.', 'todoistChildTasks');
 		this.addPropNameSetting(el, 'Todoist has children', 'Whether this task has child tasks.', 'todoistHasChildren');
 		this.addPropNameSetting(el, 'Todoist child task count', 'Number of child tasks.', 'todoistChildTaskCount');
-		this.addPropNameSetting(el, 'Todoist child tasks', 'Wiki-links to child task notes.', 'todoistChildTasks');
+
+		new Setting(el).setName('IDs & names').setHeading();
+
+		this.addPropNameSetting(el, 'Todoist project name', 'Human-readable Todoist project name.', 'todoistProjectName');
+		this.addPropNameSetting(el, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
+		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
+		this.addPropNameSetting(el, 'Todoist ID', 'The remote Todoist task ID.', 'todoistId');
+		this.addPropNameSetting(el, 'Todoist project ID', 'The remote Todoist project ID.', 'todoistProjectId');
+		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID.', 'todoistSectionId');
+		this.addPropNameSetting(el, 'Project ID', 'Frontmatter key written into project notes to track the Todoist project ID.', 'projectId');
+		this.addPropNameSetting(el, 'Section ID', 'Frontmatter key written into section notes to track the Todoist section ID.', 'sectionId');
+		this.addPropNameSetting(el, 'Todoist parent ID', 'The Todoist ID of the parent task.', 'todoistParentId');
+		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
+
+		new Setting(el).setName('Sync tracking').setHeading();
+
+		this.addPropNameSetting(el, 'Local updated at', 'Property storing when local changes were last made.', 'localUpdatedAt');
+		this.addPropNameSetting(el, 'Todoist sync', 'Whether this note is synced with Todoist.', 'todoistSync');
+		this.addPropNameSetting(el, 'Todoist sync status', 'Internal sync state (synced, dirty_local, etc.).', 'todoistSyncStatus');
 		this.addPropNameSetting(el, 'Todoist last imported signature', 'Internal hash for remote change detection.', 'todoistLastImportedSignature');
 		this.addPropNameSetting(el, 'Todoist last synced signature', 'Internal hash for local change detection.', 'todoistLastSyncedSignature');
 		this.addPropNameSetting(el, 'Todoist last imported at', 'Timestamp of last sync from Todoist.', 'todoistLastImportedAt');
-
-		new Setting(el).setName('Additional properties').setHeading();
-
-		this.addPropNameSetting(el, 'Todoist description', 'Stores the Todoist task description. The note body is your personal notes and is not synced.', 'todoistDescription');
-		this.addPropNameSetting(el, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting).', 'todoistUrl');
-		this.addPropNameSetting(el, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
-		this.addPropNameSetting(el, 'Deadline date', 'Hard deadline from Todoist (separate from due date).', 'todoistDeadline');
-
-		new Setting(el).setName('Project & section note properties').setHeading();
-
-		this.addPropNameSetting(el, 'Project ID', 'Frontmatter key written into project notes to track the Todoist project ID.', 'projectId');
-		this.addPropNameSetting(el, 'Section ID', 'Frontmatter key written into section notes to track the Todoist section ID.', 'sectionId');
-
-		new Setting(el).setName('Vault identity').setHeading();
-
-		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
-
-		new Setting(el).setName('Idempotency').setHeading();
-
-		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
 
 		new Setting(el)
 			.setName('Reset property names to defaults')
