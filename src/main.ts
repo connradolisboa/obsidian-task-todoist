@@ -32,6 +32,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private syncInProgress = false;
 	private syncQueued = false;
 	private readonly statusSyncBusy = new Set<string>();
+	private readonly lastKnownTaskStatus = new Map<string, { taskDone: boolean | null; taskStatus: string | null }>();
 	private lookupCache: { expiresAt: number; value: TodoistProjectSectionLookup } | null = null;
 	private static readonly UNCHECKED_TASK_LINE_REGEX = /^(\s*[-*+]\s+\[\s\]\s+)(.+)$/;
 
@@ -429,7 +430,6 @@ export default class TaskTodoistPlugin extends Plugin {
 	private async onMetadataCacheChanged(file: TFile): Promise<void> {
 		if (!this.isTaskFilePath(file.path)) return;
 		if (this.statusSyncBusy.has(file.path)) return;
-		if (this.syncInProgress) return;
 
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		if (!frontmatter) return;
@@ -440,22 +440,53 @@ export default class TaskTodoistPlugin extends Plugin {
 			: null;
 		const statusLower = rawStatus?.toLowerCase() ?? null;
 		const rawDone = frontmatter[p.taskDone];
-		const isDone = rawDone === true || rawDone === 'true';
-		const isNotDone = rawDone === false || rawDone === 'false';
+		const normDone: boolean | null = rawDone === true || rawDone === 'true' ? true
+			: rawDone === false || rawDone === 'false' ? false
+			: null;
+		const isDone = normDone === true;
+		const isNotDone = normDone === false;
 
+		// During sync, just update the tracking map so we have a correct baseline
+		// for the next user-initiated change — then exit without writing.
+		if (this.syncInProgress) {
+			this.lastKnownTaskStatus.set(file.path, { taskDone: normDone, taskStatus: rawStatus });
+			return;
+		}
+
+		const prev = this.lastKnownTaskStatus.get(file.path);
 		let newDone: boolean | null = null;
 		let newStatus: string | null = null;
 
-		if (statusLower === 'done') {
-			if (!isDone) newDone = true;
-		} else if (statusLower === 'open') {
-			if (!isNotDone) newDone = false;
-		} else if (!statusLower) {
-			// task_status is absent — derive it from task_done
-			if (isDone) newStatus = 'Done';
-			else if (isNotDone) newStatus = 'Open';
+		if (prev !== undefined) {
+			const taskDoneChanged = normDone !== prev.taskDone;
+			const taskStatusChanged = rawStatus !== prev.taskStatus;
+
+			if (taskDoneChanged && !taskStatusChanged) {
+				// User explicitly changed task_done → update task_status to match
+				if (isDone && statusLower !== 'done') newStatus = 'Done';
+				else if (isNotDone && statusLower !== 'open') newStatus = 'Open';
+			} else if (!taskDoneChanged && taskStatusChanged) {
+				// User changed task_status → update task_done (only for standard values)
+				if (statusLower === 'done' && !isDone) newDone = true;
+				else if (statusLower === 'open' && !isNotDone) newDone = false;
+				// Custom status: leave task_done alone
+			}
+			// Both changed (e.g. sync wrote both) or neither changed → do nothing
+		} else {
+			// No previous state recorded yet — use field-priority fallback
+			if (statusLower === 'done') {
+				if (!isDone) newDone = true;
+			} else if (statusLower === 'open') {
+				if (!isNotDone) newDone = false;
+			} else if (!statusLower) {
+				if (isDone) newStatus = 'Done';
+				else if (isNotDone) newStatus = 'Open';
+			}
+			// Custom status with no prior state: leave task_done alone
 		}
-		// Custom status value: leave both fields alone
+
+		// Always update tracking with the current observed state
+		this.lastKnownTaskStatus.set(file.path, { taskDone: normDone, taskStatus: rawStatus });
 
 		if (newDone === null && newStatus === null) return;
 
@@ -465,6 +496,11 @@ export default class TaskTodoistPlugin extends Plugin {
 				const data = fm as Record<string, unknown>;
 				if (newDone !== null) data[p.taskDone] = newDone;
 				if (newStatus !== null) data[p.taskStatus] = newStatus;
+			});
+			// Update tracking to the final written state so subsequent events see it as baseline
+			this.lastKnownTaskStatus.set(file.path, {
+				taskDone: newDone !== null ? newDone : normDone,
+				taskStatus: newStatus !== null ? newStatus : rawStatus,
 			});
 		} finally {
 			setTimeout(() => this.statusSyncBusy.delete(file.path), 500);
