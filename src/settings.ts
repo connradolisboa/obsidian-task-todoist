@@ -105,6 +105,7 @@ export interface TaskTodoistSettings {
 	autoImportProjectScope: ImportProjectScope;
 	autoImportAllowedProjectNames: string;
 	autoImportRequiredLabel: string;
+	autoImportExcludeLabel: string;
 	autoImportAssignedToMeOnly: boolean;
 	todoistTokenSecretName: string;
 	// New settings
@@ -143,6 +144,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	autoImportProjectScope: 'allow-list-by-name',
 	autoImportAllowedProjectNames: '',
 	autoImportRequiredLabel: 'obsidian',
+	autoImportExcludeLabel: '',
 	autoImportAssignedToMeOnly: true,
 	todoistTokenSecretName: DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	propNames: { ...DEFAULT_PROP_NAMES },

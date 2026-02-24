@@ -107,6 +107,7 @@ export class SyncService {
 			const activeItemById = new Map<string, TodoistItem>(snapshot.items.map((item) => [item.id, item]));
 
 			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
+			const sectionProjectIdById = new Map(snapshot.sections.map((section) => [section.id, section.project_id]));
 			const importableItems = filterImportableItems(
 				snapshot.items,
 				snapshot.projects,
@@ -132,7 +133,10 @@ export class SyncService {
 			const taskResult = await repository.syncItems(Array.from(itemsToUpsertById.values()), {
 				projectNameById,
 				sectionNameById,
+				sectionProjectIdById,
 				projectParentIdById,
+				allProjects: snapshot.projects.filter((p) => !p.is_archived),
+				allSections: snapshot.sections.filter((s) => !s.is_archived),
 			});
 
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById);
@@ -142,8 +146,8 @@ export class SyncService {
 			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
 			const unarchivedProjects = snapshot.projects.filter((p) => !p.is_archived);
 			const unarchivedSections = snapshot.sections.filter((s) => !s.is_archived);
-			await repository.applyArchivedProjectsAndSections(archivedProjects, archivedSections, projectNameById);
-			await repository.applyUnarchivedProjectsAndSections(unarchivedProjects, unarchivedSections, projectNameById);
+			await repository.applyArchivedProjectsAndSections(archivedProjects, archivedSections, projectNameById, projectParentIdById, sectionProjectIdById, sectionNameById);
+			await repository.applyUnarchivedProjectsAndSections(unarchivedProjects, unarchivedSections, projectNameById, projectParentIdById, sectionProjectIdById, sectionNameById);
 
 			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
 

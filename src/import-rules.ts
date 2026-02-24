@@ -17,6 +17,7 @@ export function filterImportableItems(
 	const excludedProjectNames = parseNameSet(settings.excludedProjectNames);
 	const excludedSectionNames = parseNameSet(settings.excludedSectionNames);
 	const requiredLabel = settings.autoImportRequiredLabel.trim().toLowerCase();
+	const excludeLabel = (settings.autoImportExcludeLabel ?? '').trim().toLowerCase();
 
 	return items.filter((item) => {
 		if (item.is_deleted) {
@@ -46,11 +47,14 @@ export function filterImportableItems(
 			}
 		}
 
-		if (requiredLabel) {
-			const labels = (item.labels ?? []).map((label) => label.toLowerCase());
-			if (!labels.includes(requiredLabel)) {
-				return false;
-			}
+		const labels = (item.labels ?? []).map((label) => label.toLowerCase());
+
+		if (requiredLabel && !labels.includes(requiredLabel)) {
+			return false;
+		}
+
+		if (excludeLabel && labels.includes(excludeLabel)) {
+			return false;
 		}
 
 		return true;

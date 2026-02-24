@@ -230,6 +230,20 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(el)
+			.setName('Exclude todoist label')
+			.setDesc('Exclude tasks that include this label from import. Leave empty for no exclusion filter.')
+			.addText((text) => {
+				text
+					.setPlaceholder('no-obsidian')
+					.setValue(this.plugin.settings.autoImportExcludeLabel)
+					.onChange(async (value) => {
+						this.plugin.settings.autoImportExcludeLabel = value.trim();
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 20;
+			});
+
+		new Setting(el)
 			.setName('Assigned to me only')
 			.setDesc('Only auto import tasks assigned to your todoist account.')
 			.addToggle((toggle) => {

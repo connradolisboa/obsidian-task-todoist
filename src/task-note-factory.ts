@@ -1,5 +1,6 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
+import type { TodoistProject } from './todoist-client';
 import { formatCreatedDate, formatModifiedDate, generateUuid, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
 import { resolveTemplateVars, TaskTemplateContext } from './template-variables';
 
@@ -244,6 +245,94 @@ export function sanitizeFileName(value: string): string {
 		.replace(/\s+/g, ' ')
 		.trim()
 		.slice(0, 80);
+}
+
+/**
+ * Returns a collision-safe sanitized folder name for a Todoist project.
+ * When two or more projects share the same sanitized name, the Todoist project ID
+ * is appended as a suffix to guarantee uniqueness: "{sanitized}-{id}".
+ */
+export function buildSanitizedProjectFolderName(
+	projectId: string,
+	projectName: string,
+	projectNameById: Map<string, string>,
+): string {
+	const sanitized = sanitizeFileName(projectName) || projectId;
+	const hasCollision = Array.from(projectNameById.entries()).some(
+		([otherId, otherName]) =>
+			otherId !== projectId &&
+			(sanitizeFileName(otherName) || otherId) === sanitized,
+	);
+	return hasCollision ? `${sanitized}-${projectId}` : sanitized;
+}
+
+/**
+ * Returns a collision-safe sanitized folder name for a Todoist section,
+ * scoped to its parent project (sections in different projects are independent).
+ */
+export function buildSanitizedSectionFolderName(
+	sectionId: string,
+	sectionName: string,
+	projectId: string,
+	sectionNameById: Map<string, string>,
+	sectionProjectIdById: Map<string, string>,
+): string {
+	const sanitized = sanitizeFileName(sectionName) || sectionId;
+	const hasCollision = Array.from(sectionNameById.entries()).some(
+		([otherId, otherName]) =>
+			otherId !== sectionId &&
+			sectionProjectIdById.get(otherId) === projectId &&
+			(sanitizeFileName(otherName) || otherId) === sanitized,
+	);
+	return hasCollision ? `${sanitized}-${sectionId}` : sanitized;
+}
+
+/**
+ * Returns the root-to-leaf list of sanitized folder name segments for a project
+ * and all its ancestors. Each segment is collision-safe via buildSanitizedProjectFolderName.
+ * Includes a cycle guard against malformed parent_id data.
+ */
+export function buildProjectFolderSegments(
+	projectId: string,
+	projectNameById: Map<string, string>,
+	projectParentIdById: Map<string, string | null>,
+): string[] {
+	const chain: string[] = [];
+	const visited = new Set<string>();
+	let current: string | null = projectId;
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		chain.unshift(current); // prepend so root is first
+		current = projectParentIdById.get(current) ?? null;
+	}
+	return chain.map((id) => {
+		const name = projectNameById.get(id) ?? id;
+		return buildSanitizedProjectFolderName(id, name, projectNameById);
+	});
+}
+
+/**
+ * Sorts projects topologically so that parent projects come before their children.
+ * This ensures parent folders are created before child folders during sync.
+ */
+export function topologicalSortProjects(projects: TodoistProject[]): TodoistProject[] {
+	const byId = new Map(projects.map((p) => [p.id, p]));
+	const result: TodoistProject[] = [];
+	const visited = new Set<string>();
+
+	function visit(id: string): void {
+		if (visited.has(id)) return;
+		visited.add(id);
+		const p = byId.get(id);
+		if (!p) return;
+		if (p.parent_id) visit(p.parent_id);
+		result.push(p);
+	}
+
+	for (const p of projects) {
+		visit(p.id);
+	}
+	return result;
 }
 
 function escapeDoubleQuotes(value: string): string {
