@@ -44,6 +44,7 @@ export interface PropNames {
 	// Wikilinks to project/section notes
 	todoistProjectLink: string;
 	todoistSectionLink: string;
+	todoistProjectColor: string;
 	todoistParentProjectLink: string;
 	todoistParentProjectName: string;
 	// Stable write-once vault UUID
@@ -86,6 +87,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistDeadline: 'todoist_deadline',
 	todoistProjectLink: 'todoist_project_link',
 	todoistSectionLink: 'todoist_section_link',
+	todoistProjectColor: 'todoist_project_color',
 	todoistParentProjectLink: 'parent_project_link',
 	todoistParentProjectName: 'parent_project_name',
 	vaultId: 'vault_id',

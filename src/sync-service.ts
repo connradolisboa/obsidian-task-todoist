@@ -119,6 +119,7 @@ export class SyncService {
 
 			const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
 			const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
+			const projectColorById = new Map(snapshot.projects.map((project) => [project.id, project.color]));
 
 			const existingSyncedTasks = await repository.listSyncedTasks();
 
@@ -135,6 +136,7 @@ export class SyncService {
 				sectionNameById,
 				sectionProjectIdById,
 				projectParentIdById,
+				projectColorById,
 				allProjects: snapshot.projects.filter((p) => !p.is_archived),
 				allSections: snapshot.sections.filter((s) => !s.is_archived),
 			});

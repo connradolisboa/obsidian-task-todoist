@@ -674,6 +674,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		new Setting(el).setName('IDs & names').setHeading();
 
 		this.addPropNameSetting(el, 'Todoist project name', 'Human-readable Todoist project name.', 'todoistProjectName');
+		this.addPropNameSetting(el, 'Todoist project color', 'Color of the Todoist project (e.g. "berry_red", "blue").', 'todoistProjectColor');
 		this.addPropNameSetting(el, 'Todoist section name', 'Human-readable Todoist section name.', 'todoistSectionName');
 		this.addPropNameSetting(el, 'Vault ID', 'Write-once stable UUID added to every plugin note at creation. Existing notes are backfilled on first sync. Never overwritten after initial write.', 'vaultId');
 		this.addPropNameSetting(el, 'Todoist ID', 'The remote Todoist task ID.', 'todoistId');

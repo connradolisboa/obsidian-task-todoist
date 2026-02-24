@@ -32,6 +32,7 @@ interface ProjectSectionMaps {
 	sectionNameById: Map<string, string>;
 	sectionProjectIdById?: Map<string, string>;
 	projectParentIdById?: Map<string, string | null>;
+	projectColorById?: Map<string, string | null>;
 	projectFileById?: Map<string, TFile>;
 	sectionFileById?: Map<string, TFile>;
 	allProjects?: TodoistProject[];
@@ -134,6 +135,7 @@ export class TaskNoteRepository {
 						projectIndex,
 						maps.projectNameById,
 						maps.projectParentIdById ?? new Map(),
+						project.color,
 					);
 					if (projectFile) {
 						projectFileById.set(project.id, projectFile);
@@ -174,6 +176,7 @@ export class TaskNoteRepository {
 					projectIndex,
 					maps.projectNameById,
 					maps.projectParentIdById ?? new Map(),
+					maps.projectColorById?.get(item.project_id) ?? null,
 				);
 				if (projectFile) {
 					projectFileById.set(item.project_id, projectFile);
@@ -241,6 +244,7 @@ export class TaskNoteRepository {
 		projectName: string,
 		projectNameById: Map<string, string>,
 		projectParentIdById: Map<string, string | null>,
+		projectColor?: string | null,
 	): Promise<void> {
 		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
 		if (!fm) return;
@@ -250,12 +254,18 @@ export class TaskNoteRepository {
 		const cachedName =
 			typeof fm[p.todoistProjectName] === 'string' ? (fm[p.todoistProjectName] as string) :
 			(typeof fm['project_name'] === 'string' ? (fm['project_name'] as string) : null);
-		if (!cachedName || cachedName === projectName) return;
+		const cachedColor = fm[p.todoistProjectColor] ?? undefined;
+		const colorChanged = projectColor !== undefined && cachedColor !== projectColor;
+		const nameChanged = cachedName !== null && cachedName !== projectName;
+		if (!nameChanged && !colorChanged) return;
 
-		// Update using configurable property name
+		// Update using configurable property names
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			frontmatter[p.todoistProjectName] = projectName;
+			if (nameChanged) frontmatter[p.todoistProjectName] = projectName;
+			if (colorChanged) frontmatter[p.todoistProjectColor] = projectColor ?? null;
 		});
+
+		if (!nameChanged) return;
 
 		// Build old sanitized name using the cached name (without disambiguation, as it was created)
 		const oldSanitized = sanitizeFileName(cachedName) || projectId;
@@ -300,11 +310,12 @@ export class TaskNoteRepository {
 		projectIndex: Map<string, TFile>,
 		projectNameById: Map<string, string>,
 		projectParentIdById: Map<string, string | null>,
+		projectColor?: string | null,
 	): Promise<TFile | null> {
 		// Check by ID vault-wide — finds the note even if it was renamed or moved
 		if (projectIndex.has(projectId)) {
 			const file = projectIndex.get(projectId)!;
-			await this.updateProjectNoteIfRenamed(file, projectId, projectName, projectNameById, projectParentIdById);
+			await this.updateProjectNoteIfRenamed(file, projectId, projectName, projectNameById, projectParentIdById, projectColor);
 			return file;
 		}
 
@@ -351,6 +362,7 @@ export class TaskNoteRepository {
 				`${p.vaultId}: "${generateUuid()}"`,
 				`${p.todoistProjectName}: "${escapeDoubleQuotes(projectName)}"`,
 				`${p.todoistProjectId}: "${escapeDoubleQuotes(projectId)}"`,
+				projectColor ? `${p.todoistProjectColor}: "${escapeDoubleQuotes(projectColor)}"` : `${p.todoistProjectColor}: null`,
 				`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 				`${p.created}: "${formatCreatedDate(now)}"`,
 				`${p.modified}: "${formatModifiedDate(now)}"`,
@@ -369,6 +381,7 @@ export class TaskNoteRepository {
 			// Always set IDs — these are critical for vault indexing
 			data[p.todoistProjectId] = projectId;
 			data[p.todoistProjectName] = projectName;
+			data[p.todoistProjectColor] = projectColor ?? null;
 			data[p.todoistUrl] = todoistUrl;
 			if (!data[p.created]) data[p.created] = formatCreatedDate(now);
 			if (!data[p.modified]) data[p.modified] = formatModifiedDate(now);
