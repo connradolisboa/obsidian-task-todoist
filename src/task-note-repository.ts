@@ -26,6 +26,7 @@ import {
 	topologicalSortProjects,
 } from './task-note-factory';
 import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
+import { buildRecurrenceString } from './todoist-rrule';
 
 interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
@@ -1064,6 +1065,19 @@ export class TaskNoteRepository {
 		});
 	}
 
+	async recordRecurringCompletion(file: TFile, completedDate: string): Promise<void> {
+		const p = getPropNames(this.settings);
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+			const existing = Array.isArray(data[p.completeInstances])
+				? (data[p.completeInstances] as unknown[]).filter((x): x is string => typeof x === 'string')
+				: [];
+			if (!existing.includes(completedDate)) {
+				data[p.completeInstances] = [...existing, completedDate];
+			}
+		});
+	}
+
 	async renameTaskFileToMatchTitle(file: TFile, title: string): Promise<TFile> {
 		if (!this.settings.autoRenameTaskFiles) {
 			return file;
@@ -1125,6 +1139,9 @@ export class TaskNoteRepository {
 		const deadlineDate = item.deadline?.date ?? '';
 		const priority = item.priority ?? 1;
 		const createdDateStr = formatCreatedDate(now);
+		const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
+			? buildRecurrenceString(item.due.string, dueDate)
+			: null;
 		const remoteImportSig = buildRemoteImportSignature(item, maps);
 		const syncedSig = buildTodoistSyncSignature({
 			title: item.content,
@@ -1170,6 +1187,11 @@ export class TaskNoteRepository {
 			data[p.todoistDue] = dueDate;
 			data[p.todoistDueString] = item.due?.string ?? '';
 			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
+			if (recurrenceStr) {
+				data[p.recurrence] = recurrenceStr;
+			} else {
+				data[p.recurrence] = null;
+			}
 			data[p.todoistDeadline] = deadlineDate || null;
 			data[p.todoistDescription] = description;
 			data[p.todoistUrl] = todoistUrl;
@@ -1235,6 +1257,9 @@ export class TaskNoteRepository {
 		const dueDate = item.due?.date ?? '';
 		const deadlineDate = item.deadline?.date ?? '';
 		const priority = item.priority ?? 1;
+		const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
+			? buildRecurrenceString(item.due.string, dueDate)
+			: null;
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
@@ -1277,9 +1302,40 @@ export class TaskNoteRepository {
 			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
 			data[p.todoistPriority] = priority;
 			data[p.todoistPriorityLabel] = priorityLabel(priority);
+
+				// Detect Todoist-side recurring completion: the due date has advanced
+			// while the task is still recurring, meaning an instance was completed
+			// in Todoist. Record the old due date in complete_instances before
+			// overwriting it with the new occurrence date.
+			if (item.due?.is_recurring && dueDate) {
+				const rawOldDue = data[p.todoistDue];
+				const oldDue = typeof rawOldDue === 'string'
+					? rawOldDue.trim()
+					: rawOldDue instanceof Date
+						? rawOldDue.toISOString().split('T')[0]
+						: '';
+				if (oldDue && oldDue !== dueDate && oldDue < dueDate) {
+					const existing = Array.isArray(data[p.completeInstances])
+						? (data[p.completeInstances] as unknown[]).filter((x): x is string => typeof x === 'string')
+						: [];
+					if (!existing.includes(oldDue)) {
+						data[p.completeInstances] = [...existing, oldDue];
+					}
+				}
+			}
+
 			data[p.todoistDue] = dueDate;
 			data[p.todoistDueString] = item.due?.string ?? '';
 			data[p.todoistIsRecurring] = Boolean(item.due?.is_recurring);
+
+			// DTSTART is written once on first creation and never changed —
+			// TaskNotes uses it to know when the recurrence originated.
+			// Only clear it when the task stops being recurring.
+			if (!item.due?.is_recurring) {
+				data[p.recurrence] = null;
+			} else if (!data[p.recurrence]) {
+				data[p.recurrence] = recurrenceStr ?? null;
+			}
 			data[p.todoistDeadline] = deadlineDate || null;
 			data[p.todoistDescription] = item.description?.trim() ?? '';
 			data[p.todoistLastImportedSignature] = remoteImportSignature;
@@ -1717,6 +1773,9 @@ function buildNewFileContent(
 	const deadlineDate = item.deadline?.date ?? '';
 	const priority = item.priority ?? 1;
 	const createdDateStr = formatCreatedDate(now);
+	const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
+		? buildRecurrenceString(item.due.string, dueDate)
+		: null;
 
 	if (settings.noteTemplate?.trim()) {
 		const context = {
@@ -1763,6 +1822,7 @@ function buildNewFileContent(
 		`${p.todoistDue}: "${escapeDoubleQuotes(dueDate)}"`,
 		`${p.todoistDueString}: "${escapeDoubleQuotes(item.due?.string ?? '')}"`,
 		`${p.todoistIsRecurring}: ${item.due?.is_recurring ? 'true' : 'false'}`,
+		...(recurrenceStr ? [`${p.recurrence}: ${toQuotedYaml(recurrenceStr)}`] : []),
 		`${p.todoistDeadline}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
 		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
 		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,

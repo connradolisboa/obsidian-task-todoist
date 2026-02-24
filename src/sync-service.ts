@@ -100,6 +100,11 @@ export class SyncService {
 					clearDue: !dueDate && !dueString,
 				});
 				await repository.markLocalUpdateSynced(pending.file, pending.syncSignature);
+				// Record the completed instance date for recurring tasks so TaskNotes
+				// can track which occurrences have been checked off.
+				if (pending.isDone && pending.isRecurring && pending.dueDate) {
+					await repository.recordRecurringCompletion(pending.file, pending.dueDate);
+				}
 				await repository.renameTaskFileToMatchTitle(pending.file, pending.title);
 			}
 

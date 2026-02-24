@@ -51,6 +51,9 @@ export interface PropNames {
 	vaultId: string;
 	// Idempotency guard for in-flight local creates
 	todoistPendingId: string;
+	// TaskNotes recurring task compatibility
+	recurrence: string;
+	completeInstances: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -92,6 +95,8 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistParentProjectName: 'parent_project_name',
 	vaultId: 'vault_id',
 	todoistPendingId: 'todoist_pending_id',
+	recurrence: 'recurrence',
+	completeInstances: 'complete_instances',
 };
 
 export interface TaskTodoistSettings {

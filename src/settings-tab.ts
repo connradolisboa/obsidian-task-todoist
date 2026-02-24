@@ -659,6 +659,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist due date', 'ISO due date from Todoist.', 'todoistDue');
 		this.addPropNameSetting(el, 'Todoist due string', 'Natural language recurrence string from Todoist.', 'todoistDueString');
 		this.addPropNameSetting(el, 'Todoist is recurring', 'Whether the task is a recurring task.', 'todoistIsRecurring');
+		this.addPropNameSetting(el, 'Recurrence', 'iCal RRULE-like recurrence string for TaskNotes compatibility (e.g. DTSTART:20260224;FREQ=DAILY;INTERVAL=1).', 'recurrence');
+		this.addPropNameSetting(el, 'Complete instances', 'Accumulated list of completed recurring task instance dates, for TaskNotes compatibility.', 'completeInstances');
 
 		new Setting(el).setName('Task relationships').setHeading();
 

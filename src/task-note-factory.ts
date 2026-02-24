@@ -3,6 +3,7 @@ import type { TaskTodoistSettings } from './settings';
 import type { TodoistProject } from './todoist-client';
 import { formatCreatedDate, formatModifiedDate, generateUuid, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
 import { resolveTemplateVars, TaskTemplateContext } from './template-variables';
+import { buildRecurrenceString } from './todoist-rrule';
 
 export interface LocalTaskNoteInput {
 	title: string;
@@ -49,6 +50,7 @@ export async function createLocalTaskNote(
 	const deadlineDate = input.todoistDeadlineDate?.trim() ?? '';
 	const priority = input.todoistPriority ?? 1;
 	const createdDateStr = formatCreatedDate(now);
+	const recurrenceStr = isRecurring && dueDate ? buildRecurrenceString(dueString, dueDate) : null;
 
 	if (settings.noteTemplate?.trim()) {
 		const context: TaskTemplateContext = {
@@ -104,6 +106,9 @@ export async function createLocalTaskNote(
 			data[p.todoistDue] = dueDate;
 			data[p.todoistDueString] = dueString;
 			data[p.todoistIsRecurring] = isRecurring;
+			if (recurrenceStr) {
+				data[p.recurrence] = recurrenceStr;
+			}
 			data[p.todoistDeadline] = deadlineDate || null;
 			data[p.todoistDescription] = description;
 			data[p.todoistUrl] = todoistUrl;
@@ -138,6 +143,7 @@ export async function createLocalTaskNote(
 		`${p.todoistDue}: "${escapeDoubleQuotes(dueDate)}"`,
 		`${p.todoistDueString}: "${escapeDoubleQuotes(dueString)}"`,
 		`${p.todoistIsRecurring}: ${isRecurring ? 'true' : 'false'}`,
+		recurrenceStr ? `${p.recurrence}: "${escapeDoubleQuotes(recurrenceStr)}"` : null,
 		deadlineDate ? `${p.todoistDeadline}: "${escapeDoubleQuotes(deadlineDate)}"` : `${p.todoistDeadline}: null`,
 		`${p.todoistDescription}: "${escapeDoubleQuotes(description)}"`,
 		todoistUrl ? `${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"` : `${p.todoistUrl}: ""`,
