@@ -597,14 +597,17 @@ export class TaskNoteRepository {
 			}
 
 			if (mode === 'none') {
-				const targetStatus = entry.isDeletedRemote ? 'deleted_remote' : 'missing_remote';
-				if (currentSyncStatus === targetStatus && currentTaskStatus === 'done') {
+				const targetStatus = entry.isDeletedRemote ? 'deleted_remote' : 'completed_remote';
+				const shouldMarkDone = !entry.isDeletedRemote;
+				if (currentSyncStatus === targetStatus && (!shouldMarkDone || currentTaskStatus === 'done')) {
 					continue;
 				}
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					setTaskStatus(data, 'done', this.settings);
+					if (shouldMarkDone) {
+						setTaskStatus(data, 'done', this.settings);
+					}
 					data[p.todoistSyncStatus] = targetStatus;
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});
@@ -618,7 +621,9 @@ export class TaskNoteRepository {
 				: mode === 'move-to-archive-folder'
 					? 'archived_remote'
 					: 'completed_remote';
-			const needsFrontmatterUpdate = currentTaskStatus !== 'done' || currentSyncStatus !== targetStatus;
+			const needsFrontmatterUpdate = entry.isDeletedRemote
+				? currentSyncStatus !== targetStatus
+				: currentTaskStatus !== 'done' || currentSyncStatus !== targetStatus;
 			const needsArchiveMove = mode === 'move-to-archive-folder' && !alreadyArchived;
 
 			if (!needsFrontmatterUpdate && !needsArchiveMove) {
@@ -629,7 +634,9 @@ export class TaskNoteRepository {
 				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
-					setTaskStatus(data, 'done', this.settings);
+					if (!entry.isDeletedRemote) {
+						setTaskStatus(data, 'done', this.settings);
+					}
 					data[p.todoistSyncStatus] = targetStatus;
 					data[p.todoistLastImportedAt] = new Date().toISOString();
 				});

@@ -120,7 +120,7 @@ export function setTaskStatus(
  * Todoist API: 4 = urgent (p1), 3 = high (p2), 2 = medium (p3), 1 = normal (p4).
  */
 export function priorityLabel(priority: number): string {
-	const map: Record<number, string> = { 4: 'high', 3: 'medium', 2: 'low', 1: 'none' };
+	const map: Record<number, string> = { 4: 'High', 3: 'Medium', 2: 'Low', 1: 'None' };
 	return map[priority] ?? 'none';
 }
 
