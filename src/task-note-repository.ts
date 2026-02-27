@@ -220,9 +220,11 @@ export class TaskNoteRepository {
 
 			const existingFile = existingByTodoistId.get(item.id);
 			const mapsWithFiles: ProjectSectionMaps = { ...maps, projectFileById, sectionFileById: sectionIndex };
+			const strippedContent = stripObsidianNoteLink(item.content);
+			const itemForObsidian = strippedContent !== item.content ? { ...item, content: strippedContent } : item;
 			const upsertResult = existingFile
-				? await this.updateTaskFile(existingFile, item, mapsWithFiles)
-				: await this.createTaskFile(item, mapsWithFiles);
+				? await this.updateTaskFile(existingFile, itemForObsidian, mapsWithFiles)
+				: await this.createTaskFile(itemForObsidian, mapsWithFiles);
 
 			created += upsertResult.created;
 			updated += upsertResult.updated;
@@ -2190,6 +2192,11 @@ function stringArraysEqual(left: string[], right: string[]): boolean {
 		}
 	}
 	return true;
+}
+
+/** Strip the obsidian note link we append to project task titles so it never leaks into note filenames or titles. */
+function stripObsidianNoteLink(content: string): string {
+	return content.replace(/\s*\[note\]\(obsidian:\/\/[^)]+\)\s*$/, '').trim();
 }
 
 function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps): string {
