@@ -551,6 +551,28 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					text.inputEl.size = 32;
 				});
 
+			if (this.plugin.settings.projectNotesFolderPath?.trim()) {
+				new Setting(el)
+					.setName('Folder notes')
+					.setDesc('Place each project note inside its own subfolder (e.g. Projects/Work/Work.md instead of Projects/Work.md). Rename and archive operations will move the whole folder.')
+					.addToggle((toggle) => {
+						toggle.setValue(this.plugin.settings.useProjectFolderNotes).onChange(async (value) => {
+							this.plugin.settings.useProjectFolderNotes = value;
+							await this.plugin.saveSettings();
+						});
+					});
+			}
+
+			new Setting(el)
+				.setName('Create project task in Todoist')
+				.setDesc('When a project note is first created, also create a task in that Todoist project. Add todoist_due_string, todoist_priority, todoist_labels, or todoist_description to the project note to set task properties before syncing.')
+				.addToggle((toggle) => {
+					toggle.setValue(this.plugin.settings.createProjectTasks).onChange(async (value) => {
+						this.plugin.settings.createProjectTasks = value;
+						await this.plugin.saveSettings();
+					});
+				});
+
 			new Setting(el)
 				.setName('Project note template')
 				.setDesc('Full-file template for project notes. Available variables: {{project_name}}, {{project_id}}, {{url}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}. Note: parent variables are empty at creation time and are written to frontmatter by sync after all project notes exist.')
@@ -596,6 +618,18 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 						});
 					text.inputEl.size = 32;
 				});
+
+			if (this.plugin.settings.sectionNotesFolderPath?.trim()) {
+				new Setting(el)
+					.setName('Folder notes')
+					.setDesc('Place each section note inside its own subfolder (e.g. Sections/Sprint 1/Sprint 1.md instead of Sections/Sprint 1.md). Rename and archive operations will move the whole folder.')
+					.addToggle((toggle) => {
+						toggle.setValue(this.plugin.settings.useSectionFolderNotes).onChange(async (value) => {
+							this.plugin.settings.useSectionFolderNotes = value;
+							await this.plugin.saveSettings();
+						});
+					});
+			}
 
 			new Setting(el)
 				.setName('Section note template')

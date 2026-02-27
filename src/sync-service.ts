@@ -57,6 +57,7 @@ export class SyncService {
 				);
 				const dueDate = pending.dueDate?.trim() || undefined;
 				const dueString = pending.dueString?.trim() || undefined;
+				const createDeadline = pending.deadline?.trim() || undefined;
 				const createdTodoistId = await todoistClient.createTask({
 					content: pending.title,
 					description: pending.description,
@@ -66,6 +67,7 @@ export class SyncService {
 					labels: pending.labels,
 					dueDate,
 					dueString,
+					deadline: createDeadline,
 				});
 				// Write the pending ID immediately so a crash before markLocalCreateSynced()
 				// does not cause a duplicate task on the next sync run.
@@ -96,6 +98,7 @@ export class SyncService {
 				);
 				const dueDate = pending.dueDate?.trim() || undefined;
 				const dueString = pending.dueString?.trim() || undefined;
+				const deadline = pending.deadline?.trim() || undefined;
 				await todoistClient.updateTask({
 					id: pending.todoistId,
 					content: pending.title,
@@ -104,9 +107,13 @@ export class SyncService {
 					isRecurring: pending.isRecurring,
 					projectId: resolvedProjectId,
 					sectionId: resolvedSectionId,
+					priority: pending.priority,
+					labels: pending.labels,
 					dueDate,
 					dueString,
 					clearDue: !dueDate && !dueString,
+					deadline,
+					clearDeadline: !deadline,
 				});
 				await repository.markLocalUpdateSynced(pending.file, pending.syncSignature);
 				// Record the completed instance date for recurring tasks so TaskNotes
@@ -158,6 +165,29 @@ export class SyncService {
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById, recentlyDeletedIds);
 			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
 
+			// Create Todoist tasks for project notes that are pending task creation
+			let projectTasksCreated = 0;
+			if (this.settings.createProjectTasks) {
+				const pendingProjectTasks = await repository.listPendingProjectTaskCreates();
+				for (const pending of pendingProjectTasks) {
+					const dueDate = pending.dueDate?.trim() || undefined;
+					const dueString = pending.dueString?.trim() || undefined;
+					const deadline = pending.deadline?.trim() || undefined;
+					const createdTaskId = await todoistClient.createTask({
+						content: pending.projectName,
+						description: pending.description || undefined,
+						projectId: pending.projectId,
+						priority: pending.priority,
+						labels: pending.labels,
+						dueDate,
+						dueString,
+						deadline,
+					});
+					await repository.markProjectTaskCreated(pending.file, createdTaskId);
+					projectTasksCreated += 1;
+				}
+			}
+
 			const archivedProjects = snapshot.projects.filter((p) => p.is_archived);
 			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
 			const unarchivedProjects = snapshot.projects.filter((p) => !p.is_archived);
@@ -168,7 +198,8 @@ export class SyncService {
 			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
 
 			const ancestorCount = importableWithAncestors.length - importableItems.length;
-			const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed.`;
+			const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
+			const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}.`;
 			return {
 				ok: true,
 				message,

@@ -434,7 +434,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	}
 
 	private async onMetadataCacheChanged(file: TFile): Promise<void> {
-		if (!this.isTaskFilePath(file.path)) return;
+		if (!this.isTaskFilePath(file.path) && !this.isDualPurposeNote(file)) return;
 		if (this.statusSyncBusy.has(file.path)) return;
 
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
@@ -572,6 +572,18 @@ export default class TaskTodoistPlugin extends Plugin {
 		const taskFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
 		const taskPrefix = `${taskFolder}/`;
 		return path === taskFolder || path.startsWith(taskPrefix);
+	}
+
+	/** Returns true for project notes that also represent a Todoist task (dual-purpose notes). */
+	private isDualPurposeNote(file: TFile): boolean {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return false;
+		const p = getPropNames(this.settings);
+		const rawPtId = fm[p.todoistProjectTaskId];
+		const rawTId = fm[p.todoistId];
+		const ptId = typeof rawPtId === 'string' ? rawPtId.trim() : '';
+		const tId = typeof rawTId === 'string' ? rawTId.trim() : '';
+		return ptId !== '' && ptId === tId;
 	}
 }
 

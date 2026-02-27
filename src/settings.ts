@@ -57,6 +57,8 @@ export interface PropNames {
 	// TaskNotes recurring task compatibility
 	recurrence: string;
 	completeInstances: string;
+	// Todoist task ID created for a project note (when createProjectTasks is enabled)
+	todoistProjectTaskId: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -101,6 +103,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistPendingId: 'todoist_pending_id',
 	recurrence: 'recurrence',
 	completeInstances: 'complete_instances',
+	todoistProjectTaskId: 'todoist_project_task_id',
 };
 
 export interface TaskTodoistSettings {
@@ -142,6 +145,11 @@ export interface TaskTodoistSettings {
 	areaProjectNoteTemplate: string;
 	projectArchiveFolderPath: string;
 	sectionArchiveFolderPath: string;
+	// Folder notes: place each project/section note inside its own subfolder
+	useProjectFolderNotes: boolean;
+	useSectionFolderNotes: boolean;
+	// Automatically create a Todoist task inside the project when a project note is first created
+	createProjectTasks: boolean;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -182,4 +190,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	areaProjectNoteTemplate: '',
 	projectArchiveFolderPath: 'Projects/_archive',
 	sectionArchiveFolderPath: '',
+	useProjectFolderNotes: false,
+	useSectionFolderNotes: false,
+	createProjectTasks: false,
 };

@@ -8,6 +8,7 @@ export function getPropNames(settings: TaskTodoistSettings): PropNames {
 export function applyStandardTaskFrontmatter(
 	frontmatter: Record<string, unknown>,
 	settings: TaskTodoistSettings,
+	options?: { skipDefaultTag?: boolean },
 ): void {
 	const p = getPropNames(settings);
 
@@ -18,14 +19,24 @@ export function applyStandardTaskFrontmatter(
 		frontmatter[p.modified] = formatModifiedDate(new Date());
 	}
 
-	const defaultTag = normalizeTag(resolveTemplateVars(settings.defaultTaskTag));
-	const existingTags = normalizeTags(frontmatter[p.tags]);
-	if (defaultTag && !existingTags.includes(defaultTag)) {
-		existingTags.unshift(defaultTag);
+	// Dual-purpose project notes (todoist_project_task_id === todoist_id, both non-empty)
+	// must never receive the default task tag, regardless of the call site.
+	const rawProjectTaskId = frontmatter[p.todoistProjectTaskId];
+	const rawTaskId = frontmatter[p.todoistId];
+	const isDualPurpose =
+		typeof rawProjectTaskId === 'string' &&
+		rawProjectTaskId.trim() !== '' &&
+		typeof rawTaskId === 'string' &&
+		rawProjectTaskId.trim() === rawTaskId.trim();
+
+	if (!options?.skipDefaultTag && !isDualPurpose) {
+		const defaultTag = normalizeTag(resolveTemplateVars(settings.defaultTaskTag));
+		const existingTags = normalizeTags(frontmatter[p.tags]);
+		if (defaultTag && !existingTags.includes(defaultTag)) {
+			existingTags.unshift(defaultTag);
+		}
+		frontmatter[p.tags] = existingTags;
 	}
-	frontmatter[p.tags] = existingTags;
-
-
 }
 
 export function touchModifiedDate(frontmatter: Record<string, unknown>, settings: TaskTodoistSettings): void {

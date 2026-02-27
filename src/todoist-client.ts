@@ -64,6 +64,7 @@ export interface TodoistCreateTaskInput {
 	labels?: string[];
 	dueDate?: string;
 	dueString?: string;
+	deadline?: string; // YYYY-MM-DD
 }
 
 export interface TodoistTaskUpdateInput {
@@ -74,9 +75,13 @@ export interface TodoistTaskUpdateInput {
 	isRecurring?: boolean;
 	projectId?: string;
 	sectionId?: string;
+	priority?: number;
+	labels?: string[];
 	dueDate?: string;
 	dueString?: string;
 	clearDue?: boolean;
+	deadline?: string; // YYYY-MM-DD, or empty string to clear
+	clearDeadline?: boolean;
 }
 
 interface TodoistSyncResponse {
@@ -222,6 +227,9 @@ export class TodoistClient {
 		if (due) {
 			args.due = due;
 		}
+		if (input.deadline?.trim()) {
+			args.deadline = { date: input.deadline.trim() };
+		}
 
 		const response = await this.syncWithCommands([
 			{
@@ -266,8 +274,12 @@ export class TodoistClient {
 				description: input.description ?? '',
 				...(input.projectId ? { project_id: input.projectId } : {}),
 				...(input.sectionId ? { section_id: input.sectionId } : {}),
+				...(typeof input.priority === 'number' ? { priority: input.priority } : {}),
+				...(input.labels !== undefined ? { labels: input.labels } : {}),
 				...(isRecurringCompletion ? {} : (due ? { due } : {})),
 				...(isRecurringCompletion ? {} : (!due && input.clearDue ? { due: null } : {})),
+				...(input.deadline?.trim() ? { deadline: { date: input.deadline.trim() } } : {}),
+				...(!input.deadline?.trim() && input.clearDeadline ? { deadline: null } : {}),
 			},
 		});
 
