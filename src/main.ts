@@ -50,7 +50,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData() as Partial<TaskTodoistSettings> | null;
+		const loaded = await this.loadData() as Partial<TaskTodoistSettings & { lastSyncToken: string | null }> | null;
 		const raw = loaded ?? {};
 		this.settings = {
 			...DEFAULT_SETTINGS,
@@ -58,10 +58,11 @@ export default class TaskTodoistPlugin extends Plugin {
 			// Deep merge propNames so partial saved configs inherit defaults for new keys
 			propNames: { ...DEFAULT_PROP_NAMES, ...(raw.propNames ?? {}) },
 		};
+		this.lastSyncToken = raw.lastSyncToken ?? null;
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		await this.saveData({ ...this.settings, lastSyncToken: this.lastSyncToken });
 	}
 
 	isSecretStorageAvailable(): boolean {
@@ -151,6 +152,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			const result = await service.runImportSync();
 			if (result.syncToken) {
 				this.lastSyncToken = result.syncToken;
+				await this.saveSettings();
 			}
 			this.setLastSync(result.message);
 			return result;

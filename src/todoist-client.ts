@@ -89,6 +89,11 @@ interface TodoistSyncResponse {
 	sync_token?: string;
 }
 
+interface TodoistActivitiesResponse {
+	next_cursor?: string;
+	results?: Array<Record<string, unknown>>;
+}
+
 export class TodoistClient {
 	private readonly token: string;
 
@@ -143,6 +148,34 @@ export class TodoistClient {
 		const payload = response.json as TodoistSyncResponse;
 		const items = normalizeItems(payload.items ?? []);
 		return new Set(items.filter((item) => item.is_deleted).map((item) => item.id));
+	}
+
+	/**
+	 * Fetches the most recent deleted item IDs from the Todoist Activities API.
+	 * Unlike the sync-token approach, this works across restarts and doesn't
+	 * require a previous sync token.
+	 */
+	async fetchRecentlyDeletedTaskIds(limit = 50): Promise<Set<string>> {
+		const params = new URLSearchParams({
+			object_event_types: '["item:deleted"]',
+			count: String(limit),
+		});
+		const response = await requestUrl({
+			url: `https://api.todoist.com/api/v1/activities?${params.toString()}`,
+			method: 'GET',
+			headers: { Authorization: `Bearer ${this.token}` },
+			throw: false,
+		});
+		if (response.status !== 200) {
+			return new Set();
+		}
+		const payload = response.json as TodoistActivitiesResponse;
+		const ids = new Set<string>();
+		for (const event of payload.results ?? []) {
+			const id = toId(event.object_id);
+			if (id) ids.add(id);
+		}
+		return ids;
 	}
 
 	async fetchProjectSectionLookup(): Promise<TodoistProjectSectionLookup> {

@@ -38,13 +38,10 @@ export class SyncService {
 			await repository.repairMalformedSignatureFrontmatterLines();
 			await repository.backfillVaultIds();
 
-			// Incremental deletion check: if we have a sync token from the last run,
-			// use it to detect items explicitly deleted since then. Both deleted and
-			// completed tasks are absent from the full sync response, but deleted items
-			// appear with is_deleted:true in an incremental sync.
-			const recentlyDeletedIds = this.lastSyncToken
-				? await todoistClient.fetchDeletedItemIds(this.lastSyncToken)
-				: new Set<string>();
+			// Deletion check via Activities API: fetch the most recently deleted item IDs.
+			// Both deleted and completed tasks are absent from the full sync response,
+			// so we use the activities log to distinguish true deletions from completions.
+			const recentlyDeletedIds = await todoistClient.fetchRecentlyDeletedTaskIds(50);
 
 			let snapshot = await todoistClient.fetchSyncSnapshot();
 			const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
