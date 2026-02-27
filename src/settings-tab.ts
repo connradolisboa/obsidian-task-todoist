@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import type TaskTodoistPlugin from './main';
 import { DEFAULT_PROP_NAMES } from './settings';
-import type { ArchiveMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
+import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
 type TabId = 'general' | 'import' | 'sync' | 'notes' | 'properties';
 
@@ -396,33 +396,60 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					});
 			});
 
-		new Setting(el).setName('Archive').setHeading();
+		new Setting(el).setName('Completed & deleted tasks').setHeading();
 
 		new Setting(el)
-			.setName('Archive mode')
-			.setDesc('How to represent completed or deleted todoist tasks locally.')
+			.setName('Behavior for completed tasks')
+			.setDesc('What to do when a task is completed in Todoist. The note is always marked as done with sync status archived_remote.')
 			.addDropdown((dropdown) => {
 				dropdown
-					.addOption('none', 'Keep notes in place')
-					.addOption('move-to-archive-folder', 'Move notes to archive folder')
-					.addOption('mark-local-done', 'Only mark notes as done')
-					.addOption('delete-file', 'Move to Obsidian trash (recoverable)')
-					.setValue(this.plugin.settings.archiveMode)
+					.addOption('keep-in-place', 'Keep in place')
+					.addOption('move-to-folder', 'Move to another folder')
+					.setValue(this.plugin.settings.completedTaskMode)
 					.onChange(async (value) => {
-						this.plugin.settings.archiveMode = value as ArchiveMode;
+						this.plugin.settings.completedTaskMode = value as CompletedTaskMode;
 						await this.plugin.saveSettings();
 					});
 			});
 
 		new Setting(el)
-			.setName('Archive folder path')
-			.setDesc('Used when archive mode is set to move notes to archive folder. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}.')
+			.setName('Completed tasks folder')
+			.setDesc('Folder to move completed task notes to. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}.')
 			.addText((text) => {
 				text
 					.setPlaceholder('Tasks/_archive')
-					.setValue(this.plugin.settings.archiveFolderPath)
+					.setValue(this.plugin.settings.completedFolderPath)
 					.onChange(async (value) => {
-						this.plugin.settings.archiveFolderPath = value.trim() || 'Tasks/_archive';
+						this.plugin.settings.completedFolderPath = value.trim() || 'Tasks/_archive';
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 32;
+			});
+
+		new Setting(el)
+			.setName('Behavior for deleted tasks')
+			.setDesc('What to do when a task is deleted in Todoist. The note is always marked with sync status deleted_remote. "Stop syncing" also removes the Todoist ID so the note is no longer tracked.')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('keep-in-place', 'Keep in place')
+					.addOption('move-to-folder', 'Move to another folder')
+					.addOption('stop-syncing', 'Stop syncing')
+					.setValue(this.plugin.settings.deletedTaskMode)
+					.onChange(async (value) => {
+						this.plugin.settings.deletedTaskMode = value as DeletedTaskMode;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(el)
+			.setName('Deleted tasks folder')
+			.setDesc('Folder to move deleted task notes to. Supports date variables: {{YYYY}}, {{MM}}, {{DD}}.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Tasks/_archive')
+					.setValue(this.plugin.settings.deletedFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.deletedFolderPath = value.trim() || 'Tasks/_archive';
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.size = 32;
@@ -652,6 +679,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist URL', 'Link to the task in Todoist (format controlled by "Link format" setting).', 'todoistUrl');
 		this.addPropNameSetting(el, 'Todoist priority', 'Task priority (1–4).', 'todoistPriority');
 		this.addPropNameSetting(el, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
+		this.addPropNameSetting(el, 'Todoist is deleted', 'Set to true when the task was confirmed deleted in Todoist (as opposed to completed).', 'todoistIsDeleted');
 
 		new Setting(el).setName('Due dates & recurrence').setHeading();
 

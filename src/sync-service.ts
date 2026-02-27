@@ -15,17 +15,20 @@ import { syncLinkedChecklistStates } from './linked-checklist-sync';
 	missingHandled?: number;
 	pushedUpdates?: number;
 	linkedChecklistUpdates?: number;
+	syncToken?: string;
 }
 
 export class SyncService {
 	private readonly app: App;
 	private readonly settings: TaskTodoistSettings;
 	private readonly token: string;
+	private readonly lastSyncToken: string | null;
 
-	constructor(app: App, settings: TaskTodoistSettings, token: string) {
+	constructor(app: App, settings: TaskTodoistSettings, token: string, lastSyncToken: string | null = null) {
 		this.app = app;
 		this.settings = settings;
 		this.token = token;
+		this.lastSyncToken = lastSyncToken;
 	}
 
 	async runImportSync(): Promise<SyncRunResult> {
@@ -34,6 +37,15 @@ export class SyncService {
 			const repository = new TaskNoteRepository(this.app, this.settings);
 			await repository.repairMalformedSignatureFrontmatterLines();
 			await repository.backfillVaultIds();
+
+			// Incremental deletion check: if we have a sync token from the last run,
+			// use it to detect items explicitly deleted since then. Both deleted and
+			// completed tasks are absent from the full sync response, but deleted items
+			// appear with is_deleted:true in an incremental sync.
+			const recentlyDeletedIds = this.lastSyncToken
+				? await todoistClient.fetchDeletedItemIds(this.lastSyncToken)
+				: new Set<string>();
+
 			let snapshot = await todoistClient.fetchSyncSnapshot();
 			const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
 
@@ -146,8 +158,8 @@ export class SyncService {
 				allSections: snapshot.sections.filter((s) => !s.is_archived),
 			});
 
-			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById);
-			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries, this.settings.archiveMode);
+			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById, recentlyDeletedIds);
+			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
 
 			const archivedProjects = snapshot.projects.filter((p) => p.is_archived);
 			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
@@ -169,6 +181,7 @@ export class SyncService {
 				missingHandled,
 				pushedUpdates: pendingLocalUpdates.length,
 				linkedChecklistUpdates,
+				syncToken: snapshot.syncToken || undefined,
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown sync error';
@@ -183,15 +196,17 @@ export class SyncService {
 function findMissingEntries(
 	existingSyncedTasks: SyncedTaskEntry[],
 	activeItemById: Map<string, TodoistItem>,
+	recentlyDeletedIds: Set<string>,
 ): MissingTaskEntry[] {
 	const result: MissingTaskEntry[] = [];
 	for (const entry of existingSyncedTasks) {
 		const remoteItem = activeItemById.get(entry.todoistId);
 		if (!remoteItem || remoteItem.is_deleted) {
-			// The sync uses sync_token='*' (full sync). Both completed and deleted tasks
-			// are absent from the response. We can only set isDeletedRemote:true when the
-			// API explicitly returns is_deleted:true; absent items are treated as completed.
-			result.push({ ...entry, isDeletedRemote: Boolean(remoteItem?.is_deleted) });
+			// Full sync only returns active items — both completed and deleted tasks are absent.
+			// We detect true deletions via an incremental sync (recentlyDeletedIds) run before
+			// the full sync; absent items not in that set are treated as completed.
+			const isDeletedRemote = Boolean(remoteItem?.is_deleted) || recentlyDeletedIds.has(entry.todoistId);
+			result.push({ ...entry, isDeletedRemote });
 		}
 	}
 	return result;

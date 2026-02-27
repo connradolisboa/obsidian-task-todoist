@@ -1,5 +1,5 @@
 import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
-import type { ArchiveMode, TaskTodoistSettings } from './settings';
+import type { TaskTodoistSettings } from './settings';
 import type { TodoistItem, TodoistProject, TodoistSection } from './todoist-client';
 import {
 	applyStandardTaskFrontmatter,
@@ -576,11 +576,14 @@ export class TaskNoteRepository {
 		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
-	async applyMissingRemoteTasks(missingEntries: MissingTaskEntry[], mode: ArchiveMode): Promise<number> {
+	async applyMissingRemoteTasks(missingEntries: MissingTaskEntry[]): Promise<number> {
 		let changed = 0;
-		const resolvedArchive = resolveTemplateVars(this.settings.archiveFolderPath);
-		const archivePrefix = `${normalizePath(resolvedArchive)}/`;
 		const p = getPropNames(this.settings);
+		const { completedTaskMode, deletedTaskMode } = this.settings;
+		const resolvedCompletedFolder = resolveTemplateVars(this.settings.completedFolderPath);
+		const completedFolderPrefix = `${normalizePath(resolvedCompletedFolder)}/`;
+		const resolvedDeletedFolder = resolveTemplateVars(this.settings.deletedFolderPath);
+		const deletedFolderPrefix = `${normalizePath(resolvedDeletedFolder)}/`;
 
 		for (const entry of missingEntries) {
 			const cachedFrontmatter = this.app.metadataCache.getFileCache(entry.file)?.frontmatter as Record<string, unknown> | undefined;
@@ -590,71 +593,93 @@ export class TaskNoteRepository {
 					: (typeof cachedFrontmatter?.sync_status === 'string' ? cachedFrontmatter.sync_status : '');
 			const currentTaskStatus = cachedFrontmatter ? getTaskStatus(cachedFrontmatter, this.settings) : 'open';
 
-			if (mode === 'delete-file') {
-				await this.app.vault.trash(entry.file, false);
-				changed += 1;
-				continue;
-			}
+			if (entry.isDeletedRemote) {
+				// --- Deleted task ---
+				const targetStatus = 'deleted_remote';
 
-			if (mode === 'none') {
-				const targetStatus = entry.isDeletedRemote ? 'deleted_remote' : 'completed_remote';
-				const shouldMarkDone = !entry.isDeletedRemote;
-				if (currentSyncStatus === targetStatus && (!shouldMarkDone || currentTaskStatus === 'done')) {
+				if (deletedTaskMode === 'stop-syncing') {
+					// Mark deleted_remote, set is_deleted flag, and remove todoist_id so it's no longer tracked
+					if (currentSyncStatus === targetStatus && !cachedFrontmatter?.[p.todoistId]) {
+						continue;
+					}
+					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+						const data = frontmatter as Record<string, unknown>;
+						applyStandardTaskFrontmatter(data, this.settings);
+						data[p.todoistSyncStatus] = targetStatus;
+						data[p.todoistIsDeleted] = true;
+						data[p.todoistLastImportedAt] = new Date().toISOString();
+						delete data[p.todoistId];
+					});
+					changed += 1;
 					continue;
 				}
-				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
-					const data = frontmatter as Record<string, unknown>;
-					applyStandardTaskFrontmatter(data, this.settings);
-					if (shouldMarkDone) {
-						setTaskStatus(data, 'done', this.settings);
-					}
-					data[p.todoistSyncStatus] = targetStatus;
-					data[p.todoistLastImportedAt] = new Date().toISOString();
-				});
-				changed += 1;
-				continue;
-			}
 
-			const alreadyArchived = entry.file.path.startsWith(archivePrefix);
-			const targetStatus = entry.isDeletedRemote
-				? 'deleted_remote'
-				: mode === 'move-to-archive-folder'
-					? 'archived_remote'
-					: 'completed_remote';
-			const needsFrontmatterUpdate = entry.isDeletedRemote
-				? currentSyncStatus !== targetStatus
-				: currentTaskStatus !== 'done' || currentSyncStatus !== targetStatus;
-			const needsArchiveMove = mode === 'move-to-archive-folder' && !alreadyArchived;
+				const alreadyMoved = entry.file.path.startsWith(deletedFolderPrefix);
+				const needsFrontmatterUpdate = currentSyncStatus !== targetStatus;
+				const needsMove = deletedTaskMode === 'move-to-folder' && !alreadyMoved;
 
-			if (!needsFrontmatterUpdate && !needsArchiveMove) {
-				continue;
-			}
-
-			if (needsFrontmatterUpdate) {
-				await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
-					const data = frontmatter as Record<string, unknown>;
-					applyStandardTaskFrontmatter(data, this.settings);
-					if (!entry.isDeletedRemote) {
-						setTaskStatus(data, 'done', this.settings);
-					}
-					data[p.todoistSyncStatus] = targetStatus;
-					data[p.todoistLastImportedAt] = new Date().toISOString();
-				});
-			}
-
-			if (needsArchiveMove) {
-				await this.ensureFolderExists(resolvedArchive);
-				const targetPath = await this.getUniqueFilePathInFolder(
-					resolvedArchive,
-					entry.file.name,
-					entry.file.path,
-				);
-				if (targetPath !== entry.file.path) {
-					await this.app.fileManager.renameFile(entry.file, targetPath);
+				if (!needsFrontmatterUpdate && !needsMove) {
+					continue;
 				}
-			}
 
-			changed += 1;
+				if (needsFrontmatterUpdate) {
+					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+						const data = frontmatter as Record<string, unknown>;
+						applyStandardTaskFrontmatter(data, this.settings);
+						data[p.todoistSyncStatus] = targetStatus;
+						data[p.todoistIsDeleted] = true;
+						data[p.todoistLastImportedAt] = new Date().toISOString();
+					});
+				}
+
+				if (needsMove) {
+					await this.ensureFolderExists(resolvedDeletedFolder);
+					const targetPath = await this.getUniqueFilePathInFolder(
+						resolvedDeletedFolder,
+						entry.file.name,
+						entry.file.path,
+					);
+					if (targetPath !== entry.file.path) {
+						await this.app.fileManager.renameFile(entry.file, targetPath);
+					}
+				}
+
+				changed += 1;
+			} else {
+				// --- Completed task: always mark as done + archived_remote ---
+				const targetStatus = 'archived_remote';
+				const alreadyMoved = entry.file.path.startsWith(completedFolderPrefix);
+				const needsFrontmatterUpdate = currentTaskStatus !== 'done' || currentSyncStatus !== targetStatus;
+				const needsMove = completedTaskMode === 'move-to-folder' && !alreadyMoved;
+
+				if (!needsFrontmatterUpdate && !needsMove) {
+					continue;
+				}
+
+				if (needsFrontmatterUpdate) {
+					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+						const data = frontmatter as Record<string, unknown>;
+						applyStandardTaskFrontmatter(data, this.settings);
+						setTaskStatus(data, 'done', this.settings);
+						data[p.todoistSyncStatus] = targetStatus;
+						data[p.todoistLastImportedAt] = new Date().toISOString();
+					});
+				}
+
+				if (needsMove) {
+					await this.ensureFolderExists(resolvedCompletedFolder);
+					const targetPath = await this.getUniqueFilePathInFolder(
+						resolvedCompletedFolder,
+						entry.file.name,
+						entry.file.path,
+					);
+					if (targetPath !== entry.file.path) {
+						await this.app.fileManager.renameFile(entry.file, targetPath);
+					}
+				}
+
+				changed += 1;
+			}
 		}
 		return changed;
 	}
@@ -680,7 +705,7 @@ export class TaskNoteRepository {
 		));
 		const resolvedTasksFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
 		const resolvedTaskArchive = normalizePath(resolveTemplateVars(
-			this.settings.archiveFolderPath || 'Tasks/_archive',
+			this.settings.completedFolderPath || 'Tasks/_archive',
 		));
 
 		for (const project of archivedProjects) {
@@ -762,7 +787,7 @@ export class TaskNoteRepository {
 		));
 		const resolvedTasksFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
 		const resolvedTaskArchive = normalizePath(resolveTemplateVars(
-			this.settings.archiveFolderPath || 'Tasks/_archive',
+			this.settings.completedFolderPath || 'Tasks/_archive',
 		));
 
 		// Process project unarchiving first so project folders exist when restoring sections
@@ -1429,6 +1454,16 @@ export class TaskNoteRepository {
 			const desiredChildCount = desiredChildLinks.length;
 
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+
+			// Skip files in terminal sync states — they're no longer actively synced and
+			// modifying them on every sync run can trigger Obsidian rendering errors.
+			const fileSyncStatus = typeof frontmatter?.[p.todoistSyncStatus] === 'string'
+				? frontmatter[p.todoistSyncStatus] as string
+				: '';
+			if (fileSyncStatus === 'archived_remote' || fileSyncStatus === 'deleted_remote') {
+				continue;
+			}
+
 			const currentHasChildren = toOptionalBoolean(frontmatter?.[p.todoistHasChildren]) ?? false;
 			const currentChildCount = toOptionalNumber(frontmatter?.[p.todoistChildTaskCount]) ?? 0;
 			const currentChildLinks = toStringArray(frontmatter?.[p.todoistChildTasks]).slice().sort((a, b) => a.localeCompare(b));

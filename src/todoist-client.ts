@@ -46,6 +46,7 @@ export interface TodoistSyncSnapshot {
 	items: TodoistItem[];
 	projects: TodoistProject[];
 	sections: TodoistSection[];
+	syncToken: string;
 }
 
 export interface TodoistProjectSectionLookup {
@@ -85,6 +86,7 @@ interface TodoistSyncResponse {
 	sections?: Array<Record<string, unknown>>;
 	temp_id_mapping?: Record<string, string>;
 	sync_status?: Record<string, unknown>;
+	sync_token?: string;
 }
 
 export class TodoistClient {
@@ -120,7 +122,27 @@ export class TodoistClient {
 			items: normalizeItems(payload.items ?? []),
 			projects: normalizeProjects(payload.projects ?? []),
 			sections: normalizeSections(payload.sections ?? []),
+			syncToken: typeof payload.sync_token === 'string' ? payload.sync_token : '',
 		};
+	}
+
+	/**
+	 * Fetches items that changed since the given sync token (incremental sync).
+	 * Returns the set of item IDs that were explicitly deleted (is_deleted: true).
+	 * Used to distinguish deleted tasks from completed tasks, since both are absent
+	 * from a full sync response.
+	 */
+	async fetchDeletedItemIds(sinceSyncToken: string): Promise<Set<string>> {
+		const response = await this.syncWithBody({
+			sync_token: sinceSyncToken,
+			resource_types: '["items"]',
+		});
+		if (response.status !== 200) {
+			return new Set();
+		}
+		const payload = response.json as TodoistSyncResponse;
+		const items = normalizeItems(payload.items ?? []);
+		return new Set(items.filter((item) => item.is_deleted).map((item) => item.id));
 	}
 
 	async fetchProjectSectionLookup(): Promise<TodoistProjectSectionLookup> {

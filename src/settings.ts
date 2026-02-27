@@ -1,6 +1,7 @@
 export const DEFAULT_TODOIST_TOKEN_SECRET_NAME = 'todoist-api';
 
-export type ArchiveMode = 'none' | 'move-to-archive-folder' | 'mark-local-done' | 'delete-file';
+export type CompletedTaskMode = 'keep-in-place' | 'move-to-folder';
+export type DeletedTaskMode = 'keep-in-place' | 'move-to-folder' | 'stop-syncing';
 export type ImportProjectScope = 'all-projects' | 'allow-list-by-name';
 export type TodoistLinkStyle = 'app' | 'web';
 export type ConflictResolution = 'local-wins' | 'remote-wins';
@@ -47,6 +48,8 @@ export interface PropNames {
 	todoistProjectColor: string;
 	todoistParentProjectLink: string;
 	todoistParentProjectName: string;
+	// Deletion flag — set to true when the task is confirmed deleted in Todoist
+	todoistIsDeleted: string;
 	// Stable write-once vault UUID
 	vaultId: string;
 	// Idempotency guard for in-flight local creates
@@ -93,6 +96,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistProjectColor: 'todoist_project_color',
 	todoistParentProjectLink: 'parent_project_link',
 	todoistParentProjectName: 'parent_project_name',
+	todoistIsDeleted: 'todoist_is_deleted',
 	vaultId: 'vault_id',
 	todoistPendingId: 'todoist_pending_id',
 	recurrence: 'recurrence',
@@ -106,8 +110,10 @@ export interface TaskTodoistSettings {
 	autoSyncEnabled: boolean;
 	autoSyncIntervalMinutes: number;
 	showScheduledSyncNotices: boolean;
-	archiveMode: ArchiveMode;
-	archiveFolderPath: string;
+	completedTaskMode: CompletedTaskMode;
+	completedFolderPath: string;
+	deletedTaskMode: DeletedTaskMode;
+	deletedFolderPath: string;
 	autoImportEnabled: boolean;
 	autoImportProjectScope: ImportProjectScope;
 	autoImportAllowedProjectNames: string;
@@ -145,8 +151,10 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	autoSyncEnabled: true,
 	autoSyncIntervalMinutes: 5,
 	showScheduledSyncNotices: false,
-	archiveMode: 'move-to-archive-folder',
-	archiveFolderPath: 'Tasks/_archive',
+	completedTaskMode: 'keep-in-place',
+	completedFolderPath: 'Tasks/_archive',
+	deletedTaskMode: 'keep-in-place',
+	deletedFolderPath: 'Tasks/_archive',
 	autoImportEnabled: true,
 	autoImportProjectScope: 'allow-list-by-name',
 	autoImportAllowedProjectNames: '',

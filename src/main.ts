@@ -31,6 +31,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private scheduledSyncIntervalId: number | null = null;
 	private syncInProgress = false;
 	private syncQueued = false;
+	private lastSyncToken: string | null = null;
 	private readonly statusSyncBusy = new Set<string>();
 	private readonly lastKnownTaskStatus = new Map<string, { taskDone: boolean | null; taskStatus: string | null }>();
 	private lookupCache: { expiresAt: number; value: TodoistProjectSectionLookup } | null = null;
@@ -146,8 +147,11 @@ export default class TaskTodoistPlugin extends Plugin {
 		}
 
 		try {
-			const service = new SyncService(this.app, this.settings, token);
+			const service = new SyncService(this.app, this.settings, token, this.lastSyncToken);
 			const result = await service.runImportSync();
+			if (result.syncToken) {
+				this.lastSyncToken = result.syncToken;
+			}
 			this.setLastSync(result.message);
 			return result;
 		} finally {
@@ -544,6 +548,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			currentStatus === 'dirty_local' ||
 			currentStatus === 'queued_local_create' ||
 			currentStatus === 'deleted_remote' ||
+			currentStatus === 'archived_remote' ||
 			currentStatus === 'missing_remote'
 		) {
 			return;
