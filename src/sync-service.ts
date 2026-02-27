@@ -173,8 +173,11 @@ export class SyncService {
 					const dueDate = pending.dueDate?.trim() || undefined;
 					const dueString = pending.dueString?.trim() || undefined;
 					const deadline = pending.deadline?.trim() || undefined;
+					const vaultName = encodeURIComponent(this.app.vault.getName());
+					const filePath = encodeURIComponent(pending.file.path);
+					const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 					const createdTaskId = await todoistClient.createTask({
-						content: pending.projectName,
+						content: `${pending.projectName} [note](${obsidianUri})`,
 						description: pending.description || undefined,
 						projectId: pending.projectId,
 						priority: pending.priority,
