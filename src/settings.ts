@@ -59,6 +59,8 @@ export interface PropNames {
 	completeInstances: string;
 	// Todoist task ID created for a project note (when createProjectTasks is enabled)
 	todoistProjectTaskId: string;
+	// Task duration in minutes (synced two-way with Todoist)
+	todoistDuration: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -104,6 +106,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	recurrence: 'recurrence',
 	completeInstances: 'complete_instances',
 	todoistProjectTaskId: 'todoist_project_task_id',
+	todoistDuration: 'todoist_duration',
 };
 
 export interface TaskTodoistSettings {

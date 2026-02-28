@@ -68,6 +68,7 @@ export class SyncService {
 					dueDate,
 					dueString,
 					deadline: createDeadline,
+					duration: pending.duration,
 				});
 				// Write the pending ID immediately so a crash before markLocalCreateSynced()
 				// does not cause a duplicate task on the next sync run.
@@ -114,6 +115,8 @@ export class SyncService {
 					clearDue: !dueDate && !dueString,
 					deadline,
 					clearDeadline: !deadline,
+					duration: pending.duration,
+					clearDuration: pending.duration === undefined || pending.duration === null,
 				});
 				await repository.markLocalUpdateSynced(pending.file, pending.syncSignature);
 				// Record the completed instance date for recurring tasks so TaskNotes
@@ -185,6 +188,7 @@ export class SyncService {
 						dueDate,
 						dueString,
 						deadline,
+						duration: pending.duration,
 					});
 					await repository.markProjectTaskCreated(pending.file, createdTaskId);
 					projectTasksCreated += 1;

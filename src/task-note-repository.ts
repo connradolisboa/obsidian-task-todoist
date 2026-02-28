@@ -82,6 +82,7 @@ export interface PendingLocalCreate {
 	priority?: number;
 	labels?: string[];
 	deadline?: string;
+	duration?: number;
 }
 
 export interface PendingProjectTaskCreate {
@@ -94,6 +95,7 @@ export interface PendingProjectTaskCreate {
 	priority?: number;
 	labels?: string[];
 	deadline?: string;
+	duration?: number;
 }
 
 export interface PendingLocalUpdate {
@@ -113,6 +115,7 @@ export interface PendingLocalUpdate {
 	priority?: number;
 	labels?: string[];
 	deadline?: string;
+	duration?: number;
 }
 
 export class TaskNoteRepository {
@@ -1057,6 +1060,7 @@ export class TaskNoteRepository {
 			const priority = toOptionalNumber(frontmatter[p.todoistPriority]);
 			const labels = toStringArray(frontmatter[p.todoistLabels]);
 			const deadline = toOptionalString(frontmatter[p.todoistDeadline]);
+			const duration = toOptionalNumber(frontmatter[p.todoistDuration]);
 			const signature = buildTodoistSyncSignature({
 				title,
 				description,
@@ -1069,6 +1073,7 @@ export class TaskNoteRepository {
 				priority,
 				labels,
 				deadline,
+				duration,
 			});
 
 			pending.push({
@@ -1087,6 +1092,7 @@ export class TaskNoteRepository {
 				priority,
 				labels,
 				deadline,
+				duration,
 			});
 		}
 
@@ -1145,8 +1151,9 @@ export class TaskNoteRepository {
 			const priority = toOptionalNumber(fm[p.todoistPriority]);
 			const labels = toStringArray(fm[p.todoistLabels]);
 			const deadline = toOptionalString(fm[p.todoistDeadline]);
+			const duration = toOptionalNumber(fm[p.todoistDuration]);
 
-			pending.push({ file, projectId, projectName, description, dueDate, dueString, priority, labels, deadline });
+			pending.push({ file, projectId, projectName, description, dueDate, dueString, priority, labels, deadline, duration });
 		}
 
 		return pending;
@@ -1224,6 +1231,7 @@ export class TaskNoteRepository {
 			const priority = toOptionalNumber(frontmatter[p.todoistPriority]);
 			const labels = toStringArray(frontmatter[p.todoistLabels]);
 			const deadline = toOptionalString(frontmatter[p.todoistDeadline]);
+			const duration = toOptionalNumber(frontmatter[p.todoistDuration]);
 			const signature = buildTodoistSyncSignature({
 				title,
 				description,
@@ -1236,6 +1244,7 @@ export class TaskNoteRepository {
 				priority,
 				labels,
 				deadline,
+				duration,
 			});
 			const lastSyncedSignature =
 				typeof frontmatter[p.todoistLastSyncedSignature] === 'string'
@@ -1270,6 +1279,7 @@ export class TaskNoteRepository {
 				priority,
 				labels,
 				deadline,
+				duration,
 			});
 		}
 
@@ -1363,6 +1373,7 @@ export class TaskNoteRepository {
 		const dueDate = item.due?.date ?? '';
 		const deadlineDate = item.deadline?.date ?? '';
 		const priority = item.priority ?? 1;
+		const durationMinutes = item.duration?.amount ?? null;
 		const createdDateStr = formatCreatedDate(now);
 		const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
 			? buildRecurrenceString(item.due.string, dueDate)
@@ -1380,6 +1391,7 @@ export class TaskNoteRepository {
 			priority,
 			labels: item.labels ?? [],
 			deadline: deadlineDate,
+			duration: durationMinutes ?? undefined,
 		});
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
@@ -1421,6 +1433,7 @@ export class TaskNoteRepository {
 				data[p.recurrence] = null;
 			}
 			data[p.todoistDeadline] = deadlineDate || null;
+			data[p.todoistDuration] = durationMinutes;
 			data[p.todoistDescription] = description;
 			data[p.todoistUrl] = todoistUrl;
 			data[p.todoistLabels] = item.labels ?? [];
@@ -1493,6 +1506,7 @@ export class TaskNoteRepository {
 		const dueDate = item.due?.date ?? '';
 		const deadlineDate = item.deadline?.date ?? '';
 		const priority = item.priority ?? 1;
+		const durationMinutes = item.duration?.amount ?? null;
 		const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
 			? buildRecurrenceString(item.due.string, dueDate)
 			: null;
@@ -1573,6 +1587,7 @@ export class TaskNoteRepository {
 				data[p.recurrence] = recurrenceStr ?? null;
 			}
 			data[p.todoistDeadline] = deadlineDate || null;
+			data[p.todoistDuration] = durationMinutes;
 			data[p.todoistDescription] = item.description?.trim() ?? '';
 			data[p.todoistLastImportedSignature] = remoteImportSignature;
 			data[p.todoistLastSyncedSignature] = buildTodoistSyncSignature({
@@ -1587,6 +1602,7 @@ export class TaskNoteRepository {
 				priority,
 				labels: item.labels ?? [],
 				deadline: deadlineDate,
+				duration: durationMinutes ?? undefined,
 			});
 			data[p.todoistSyncStatus] = 'synced';
 			if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
@@ -2040,6 +2056,7 @@ function buildNewFileContent(
 	const dueDate = item.due?.date ?? '';
 	const deadlineDate = item.deadline?.date ?? '';
 	const priority = item.priority ?? 1;
+	const durationMinutes = item.duration?.amount ?? null;
 	const createdDateStr = formatCreatedDate(now);
 	const recurrenceStr = item.due?.is_recurring && dueDate && item.due.string
 		? buildRecurrenceString(item.due.string, dueDate)
@@ -2092,6 +2109,7 @@ function buildNewFileContent(
 		`${p.todoistIsRecurring}: ${item.due?.is_recurring ? 'true' : 'false'}`,
 		...(recurrenceStr ? [`${p.recurrence}: ${toQuotedYaml(recurrenceStr)}`] : []),
 		`${p.todoistDeadline}: ${deadlineDate ? toQuotedYaml(deadlineDate) : 'null'}`,
+		`${p.todoistDuration}: ${durationMinutes !== null ? durationMinutes : 'null'}`,
 		`${p.todoistDescription}: ${toQuotedYaml(description)}`,
 		`${p.todoistUrl}: "${escapeDoubleQuotes(todoistUrl)}"`,
 		`${p.todoistProjectLink}: ${toQuotedYaml(projectLink)}`,
@@ -2109,6 +2127,7 @@ function buildNewFileContent(
 			priority,
 			labels: item.labels ?? [],
 			deadline: deadlineDate,
+			duration: durationMinutes ?? undefined,
 		}))}"`,
 		`${p.todoistLabels}: [${(item.labels ?? []).map((label) => toQuotedYamlInline(label)).join(', ')}]`,
 		`${p.todoistParentId}: "${escapeDoubleQuotes(item.parent_id ?? '')}"`,
@@ -2215,6 +2234,7 @@ function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps)
 		item.parent_id ?? '',
 		(item.labels ?? []).join('|'),
 		item.deadline?.date ?? '',
+		item.duration?.amount ?? null,
 	]));
 }
 
@@ -2230,6 +2250,7 @@ function buildTodoistSyncSignature(input: {
 	priority?: number;
 	labels?: string[];
 	deadline?: string;
+	duration?: number;
 }): string {
 	return simpleStableHash(JSON.stringify([
 		input.title.trim(),
@@ -2243,6 +2264,7 @@ function buildTodoistSyncSignature(input: {
 		input.priority ?? 1,
 		(input.labels ?? []).slice().sort().join('|'),
 		input.deadline?.trim() ?? '',
+		input.duration ?? null,
 	]));
 }
 

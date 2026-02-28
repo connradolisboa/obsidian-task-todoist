@@ -24,6 +24,10 @@ export interface TodoistItem {
 		date: string;
 		lang?: string | null;
 	} | null;
+	duration?: {
+		amount: number;
+		unit: string;
+	} | null;
 }
 
 export interface TodoistProject {
@@ -65,6 +69,7 @@ export interface TodoistCreateTaskInput {
 	dueDate?: string;
 	dueString?: string;
 	deadline?: string; // YYYY-MM-DD
+	duration?: number; // minutes
 }
 
 export interface TodoistTaskUpdateInput {
@@ -82,6 +87,8 @@ export interface TodoistTaskUpdateInput {
 	clearDue?: boolean;
 	deadline?: string; // YYYY-MM-DD, or empty string to clear
 	clearDeadline?: boolean;
+	duration?: number; // minutes
+	clearDuration?: boolean;
 }
 
 interface TodoistSyncResponse {
@@ -230,6 +237,9 @@ export class TodoistClient {
 		if (input.deadline?.trim()) {
 			args.deadline = { date: input.deadline.trim() };
 		}
+		if (typeof input.duration === 'number' && input.duration > 0) {
+			args.duration = { amount: input.duration, unit: 'minute' };
+		}
 
 		const response = await this.syncWithCommands([
 			{
@@ -280,6 +290,9 @@ export class TodoistClient {
 				...(isRecurringCompletion ? {} : (!due && input.clearDue ? { due: null } : {})),
 				...(input.deadline?.trim() ? { deadline: { date: input.deadline.trim() } } : {}),
 				...(!input.deadline?.trim() && input.clearDeadline ? { deadline: null } : {}),
+				...(typeof input.duration === 'number' && input.duration > 0
+					? { duration: { amount: input.duration, unit: 'minute' } }
+					: input.clearDuration ? { duration: null } : {}),
 			},
 		});
 
@@ -392,6 +405,7 @@ function normalizeItems(rawItems: Array<Record<string, unknown>>): TodoistItem[]
 			is_deleted: Boolean(raw.is_deleted),
 			responsible_uid: toOptionalId(raw.responsible_uid),
 			deadline: toDeadline(raw.deadline),
+			duration: toDuration(raw.duration),
 		});
 	}
 	return items;
@@ -518,4 +532,15 @@ function toDeadline(value: unknown): { date: string; lang?: string | null } | nu
 		date,
 		lang: typeof dl.lang === 'string' ? dl.lang : null,
 	};
+}
+
+function toDuration(value: unknown): { amount: number; unit: string } | null {
+	if (!value || typeof value !== 'object') {
+		return null;
+	}
+	const d = value as { amount?: unknown; unit?: unknown };
+	if (typeof d.amount !== 'number' || typeof d.unit !== 'string') {
+		return null;
+	}
+	return { amount: d.amount, unit: d.unit };
 }
