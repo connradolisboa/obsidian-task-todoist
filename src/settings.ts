@@ -151,8 +151,12 @@ export interface TaskTodoistSettings {
 	// Folder notes: place each project/section note inside its own subfolder
 	useProjectFolderNotes: boolean;
 	useSectionFolderNotes: boolean;
+	// Mirror parent project hierarchy when placing project notes in a dedicated folder
+	useProjectNoteSubfolders: boolean;
 	// Automatically create a Todoist task inside the project when a project note is first created
 	createProjectTasks: boolean;
+	// Separate folder for area project notes (overrides projectNotesFolderPath for areas)
+	areaNotesFolderPath: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -195,5 +199,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	sectionArchiveFolderPath: '',
 	useProjectFolderNotes: false,
 	useSectionFolderNotes: false,
+	useProjectNoteSubfolders: false,
 	createProjectTasks: false,
+	areaNotesFolderPath: '',
 };

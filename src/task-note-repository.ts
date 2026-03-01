@@ -297,9 +297,41 @@ export class TaskNoteRepository {
 
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
-		if (this.settings.projectNotesFolderPath?.trim()) {
-			const baseFolderPath = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
-			if (this.settings.useProjectFolderNotes) {
+		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
+		const isAreaNote = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
+		const effectiveFolder = (isAreaNote && this.settings.areaNotesFolderPath?.trim())
+			? this.settings.areaNotesFolderPath
+			: this.settings.projectNotesFolderPath;
+
+		if (effectiveFolder?.trim()) {
+			const baseFolderPath = normalizePath(resolveTemplateVars(effectiveFolder));
+			if (this.settings.useProjectNoteSubfolders && !isAreaNote) {
+				// Nested subfolder mode: the file lives under {base}/{...parentSegments}/{leafName}.md
+				// or {base}/{...parentSegments}/{leafName}/{leafName}.md with folder notes
+				const parentSegments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById).slice(0, -1);
+				const nestedBase = parentSegments.length > 0
+					? normalizePath([baseFolderPath, ...parentSegments].join('/'))
+					: baseFolderPath;
+				if (this.settings.useProjectFolderNotes) {
+					const oldFolderPath = normalizePath(`${nestedBase}/${oldSanitized}`);
+					const newFolderPath = normalizePath(`${nestedBase}/${newSanitized}`);
+					const oldFolder = this.app.vault.getAbstractFileByPath(oldFolderPath);
+					if (oldFolder instanceof TFolder && !this.app.vault.getAbstractFileByPath(newFolderPath)) {
+						await this.app.fileManager.renameFile(oldFolder, newFolderPath);
+						if (file.name !== `${newSanitized}.md`) {
+							const newFilePath = normalizePath(`${newFolderPath}/${newSanitized}.md`);
+							if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+								await this.app.fileManager.renameFile(file, newFilePath);
+							}
+						}
+					}
+				} else {
+					const newFilePath = normalizePath(`${nestedBase}/${newSanitized}.md`);
+					if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+						await this.app.fileManager.renameFile(file, newFilePath);
+					}
+				}
+			} else if (this.settings.useProjectFolderNotes && !isAreaNote) {
 				// Folder notes mode: rename the subfolder (and inner note if needed)
 				const oldFolderPath = normalizePath(`${baseFolderPath}/${oldSanitized}`);
 				const newFolderPath = normalizePath(`${baseFolderPath}/${newSanitized}`);
@@ -362,12 +394,26 @@ export class TaskNoteRepository {
 		const p = getPropNames(this.settings);
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
+		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
+		const isAreaForPath = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
+		const effectiveProjectFolder = (isAreaForPath && this.settings.areaNotesFolderPath?.trim())
+			? this.settings.areaNotesFolderPath
+			: this.settings.projectNotesFolderPath;
+
 		let folderPath: string;
 		let fileName: string;
-		if (this.settings.projectNotesFolderPath?.trim()) {
+		if (effectiveProjectFolder?.trim()) {
 			const sanitizedName = buildSanitizedProjectFolderName(projectId, projectName, projectNameById);
-			const baseFolderPath = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
-			if (this.settings.useProjectFolderNotes) {
+			const baseFolderPath = normalizePath(resolveTemplateVars(effectiveProjectFolder));
+			if (this.settings.useProjectNoteSubfolders && !isAreaForPath) {
+				const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);
+				const nestedBase = normalizePath([baseFolderPath, ...segments.slice(0, -1)].join('/'));
+				if (this.settings.useProjectFolderNotes) {
+					folderPath = normalizePath(`${nestedBase}/${sanitizedName}`);
+				} else {
+					folderPath = nestedBase;
+				}
+			} else if (this.settings.useProjectFolderNotes && !isAreaForPath) {
 				folderPath = normalizePath(`${baseFolderPath}/${sanitizedName}`);
 			} else {
 				folderPath = baseFolderPath;
@@ -394,10 +440,8 @@ export class TaskNoteRepository {
 
 		const todoistUrl = buildTodoistProjectUrl(projectId, this.settings);
 		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId, url: todoistUrl };
-		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
-		const isArea = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
 		let content: string;
-		if (isArea && this.settings.areaProjectNoteTemplate?.trim()) {
+		if (isAreaForPath && this.settings.areaProjectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.areaProjectNoteTemplate, now, context);
 		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
@@ -899,13 +943,29 @@ export class TaskNoteRepository {
 			// Determine target note path (mirrors ensureProjectNote logic)
 			const segments = buildProjectFolderSegments(project.id, projectNameById, projectParentIdById);
 			const leafSegment = segments[segments.length - 1] ?? (sanitizeFileName(project.name) || project.id);
-			if (this.settings.projectNotesFolderPath?.trim() && this.settings.useProjectFolderNotes) {
+			const unarchivedAreaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
+			const isUnarchivedArea = unarchivedAreaNames.size > 0 && unarchivedAreaNames.has(project.name.toLowerCase());
+			const unarchivedEffectiveFolder = (isUnarchivedArea && this.settings.areaNotesFolderPath?.trim())
+				? this.settings.areaNotesFolderPath
+				: this.settings.projectNotesFolderPath;
+
+			if (unarchivedEffectiveFolder?.trim() && this.settings.useProjectFolderNotes) {
 				// Folder notes: move the whole subfolder back from archive
 				const sanitizedName = buildSanitizedProjectFolderName(project.id, project.name, projectNameById);
-				const baseFolder = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
-				const targetFolderPath = normalizePath(`${baseFolder}/${sanitizedName}`);
-				if (file.parent instanceof TFolder && file.parent.path !== targetFolderPath) {
+				const baseFolder = normalizePath(resolveTemplateVars(unarchivedEffectiveFolder));
+				let targetFolderPath: string;
+				if (this.settings.useProjectNoteSubfolders && !isUnarchivedArea) {
+					const parentSegments = segments.slice(0, -1);
+					const nestedBase = parentSegments.length > 0
+						? normalizePath([baseFolder, ...parentSegments].join('/'))
+						: baseFolder;
+					await this.ensureFolderExists(nestedBase);
+					targetFolderPath = normalizePath(`${nestedBase}/${sanitizedName}`);
+				} else {
 					await this.ensureFolderExists(baseFolder);
+					targetFolderPath = normalizePath(`${baseFolder}/${sanitizedName}`);
+				}
+				if (file.parent instanceof TFolder && file.parent.path !== targetFolderPath) {
 					if (!this.app.vault.getAbstractFileByPath(targetFolderPath)) {
 						await this.app.fileManager.renameFile(file.parent, targetFolderPath);
 						moved += 1;
@@ -913,11 +973,20 @@ export class TaskNoteRepository {
 				}
 			} else {
 				let targetNotePath: string;
-				if (this.settings.projectNotesFolderPath?.trim()) {
+				if (unarchivedEffectiveFolder?.trim()) {
 					const sanitizedName = buildSanitizedProjectFolderName(project.id, project.name, projectNameById);
-					const folder = normalizePath(resolveTemplateVars(this.settings.projectNotesFolderPath));
-					await this.ensureFolderExists(folder);
-					targetNotePath = await this.getUniqueFilePathInFolder(folder, `${sanitizedName}.md`, file.path);
+					const baseFolder = normalizePath(resolveTemplateVars(unarchivedEffectiveFolder));
+					if (this.settings.useProjectNoteSubfolders && !isUnarchivedArea) {
+						const parentSegments = segments.slice(0, -1);
+						const nestedBase = parentSegments.length > 0
+							? normalizePath([baseFolder, ...parentSegments].join('/'))
+							: baseFolder;
+						await this.ensureFolderExists(nestedBase);
+						targetNotePath = await this.getUniqueFilePathInFolder(nestedBase, `${sanitizedName}.md`, file.path);
+					} else {
+						await this.ensureFolderExists(baseFolder);
+						targetNotePath = await this.getUniqueFilePathInFolder(baseFolder, `${sanitizedName}.md`, file.path);
+					}
 				} else if (this.settings.useProjectSubfolders) {
 					const folder = normalizePath([resolvedTasksFolder, ...segments].join('/'));
 					await this.ensureFolderExists(folder);

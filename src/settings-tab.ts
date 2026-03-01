@@ -553,6 +553,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 			if (this.plugin.settings.projectNotesFolderPath?.trim()) {
 				new Setting(el)
+					.setName('Mirror parent hierarchy')
+					.setDesc('Nest project notes into subfolders matching the Todoist parent project hierarchy (e.g. Projects/Work/Marketing.md). Area projects always stay flat.')
+					.addToggle((toggle) => {
+						toggle.setValue(this.plugin.settings.useProjectNoteSubfolders).onChange(async (value) => {
+							this.plugin.settings.useProjectNoteSubfolders = value;
+							await this.plugin.saveSettings();
+						});
+					});
+
+				new Setting(el)
 					.setName('Folder notes')
 					.setDesc('Place each project note inside its own subfolder (e.g. Projects/Work/Work.md instead of Projects/Work.md). Rename and archive operations will move the whole folder.')
 					.addToggle((toggle) => {
@@ -651,6 +661,20 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		new Setting(el).setName('Area projects').setHeading();
 
 		let areaTemplateSetting: Setting;
+
+		new Setting(el)
+			.setName('Area notes folder')
+			.setDesc('Separate folder for area project notes. If set, area notes go here instead of the project notes folder. Leave empty to use the project notes folder.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Areas')
+					.setValue(this.plugin.settings.areaNotesFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.areaNotesFolderPath = value.trim();
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 32;
+			});
 
 		new Setting(el)
 			.setName('Area project names')
