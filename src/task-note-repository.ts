@@ -1,5 +1,6 @@
-import { App, Notice, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, TFile, TFolder, normalizePath } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
+import { notify } from './notify';
 import type { TodoistItem, TodoistProject, TodoistSection } from './todoist-client';
 import {
 	applyStandardTaskFrontmatter,
@@ -23,6 +24,8 @@ import {
 	buildSanitizedProjectFolderName,
 	buildSanitizedSectionFolderName,
 	buildProjectFolderSegments,
+	buildProjectFolderSegmentsFrom,
+	findReferenceRootId,
 	topologicalSortProjects,
 } from './task-note-factory';
 import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
@@ -131,8 +134,8 @@ export class TaskNoteRepository {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		await this.ensureFolderExists(resolvedFolder);
 
-		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex, duplicateTaskIds } = this.buildVaultIndexes();
-		this.emitDuplicateIdWarnings(duplicateTaskIds);
+		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex, duplicateTaskFiles } = this.buildVaultIndexes();
+		await this.autoResolveDuplicateIds(duplicateTaskFiles, existingByTodoistId);
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
 		const pendingParents: ParentAssignment[] = [];
 		const seenProjectIds = new Set<string>();
@@ -297,6 +300,33 @@ export class TaskNoteRepository {
 
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 
+		// Reference projects always use folder-notes style relative to referenceNotesFolderPath
+		const refNames = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+		const refRootId = refNames.size > 0
+			? findReferenceRootId(projectId, projectNameById, projectParentIdById, refNames)
+			: null;
+		if (refRootId && this.settings.referenceNotesFolderPath?.trim()) {
+			const refBase = normalizePath(resolveTemplateVars(this.settings.referenceNotesFolderPath));
+			const segments = buildProjectFolderSegmentsFrom(projectId, refRootId, projectNameById, projectParentIdById);
+			const parentSegments = segments.slice(0, -1);
+			const nestedBase = parentSegments.length > 0
+				? normalizePath([refBase, ...parentSegments].join('/'))
+				: refBase;
+			const oldFolderPath = normalizePath(`${nestedBase}/${oldSanitized}`);
+			const newFolderPath = normalizePath(`${nestedBase}/${newSanitized}`);
+			const oldFolder = this.app.vault.getAbstractFileByPath(oldFolderPath);
+			if (oldFolder instanceof TFolder && !this.app.vault.getAbstractFileByPath(newFolderPath)) {
+				await this.app.fileManager.renameFile(oldFolder, newFolderPath);
+				if (file.name !== `${newSanitized}.md`) {
+					const newFilePath = normalizePath(`${newFolderPath}/${newSanitized}.md`);
+					if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+						await this.app.fileManager.renameFile(file, newFilePath);
+					}
+				}
+			}
+			return;
+		}
+
 		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
 		const isAreaNote = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
 		const effectiveFolder = (isAreaNote && this.settings.areaNotesFolderPath?.trim())
@@ -375,6 +405,118 @@ export class TaskNoteRepository {
 		}
 	}
 
+	/**
+	 * Computes the expected folder path and file name for a project note based on current settings.
+	 * Returns null if no path can be determined (e.g. no project subfolders configured).
+	 */
+	private computeProjectNotePath(
+		projectId: string,
+		projectName: string,
+		projectNameById: Map<string, string>,
+		projectParentIdById: Map<string, string | null>,
+	): { folderPath: string; fileName: string } | null {
+		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+
+		const refNames = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+		const refRootId = refNames.size > 0
+			? findReferenceRootId(projectId, projectNameById, projectParentIdById, refNames)
+			: null;
+		if (refRootId && this.settings.referenceNotesFolderPath?.trim()) {
+			const segments = buildProjectFolderSegmentsFrom(projectId, refRootId, projectNameById, projectParentIdById);
+			const refBase = normalizePath(resolveTemplateVars(this.settings.referenceNotesFolderPath));
+			const folderPath = normalizePath([refBase, ...segments].join('/'));
+			const leafSegment = segments[segments.length - 1] ?? (sanitizeFileName(projectName) || projectId);
+			return { folderPath, fileName: `${leafSegment}.md` };
+		}
+
+		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
+		const isAreaForPath = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
+		const effectiveProjectFolder = (isAreaForPath && this.settings.areaNotesFolderPath?.trim())
+			? this.settings.areaNotesFolderPath
+			: this.settings.projectNotesFolderPath;
+
+		if (effectiveProjectFolder?.trim()) {
+			const sanitizedName = buildSanitizedProjectFolderName(projectId, projectName, projectNameById);
+			const baseFolderPath = normalizePath(resolveTemplateVars(effectiveProjectFolder));
+			let folderPath: string;
+			if (this.settings.useProjectNoteSubfolders && !isAreaForPath) {
+				const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);
+				const nestedBase = normalizePath([baseFolderPath, ...segments.slice(0, -1)].join('/'));
+				folderPath = this.settings.useProjectFolderNotes
+					? normalizePath(`${nestedBase}/${sanitizedName}`)
+					: nestedBase;
+			} else if (this.settings.useProjectFolderNotes && !isAreaForPath) {
+				folderPath = normalizePath(`${baseFolderPath}/${sanitizedName}`);
+			} else {
+				folderPath = baseFolderPath;
+			}
+			return { folderPath, fileName: `${sanitizedName}.md` };
+		}
+
+		if (this.settings.useProjectSubfolders) {
+			const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);
+			const folderPath = normalizePath([resolvedFolder, ...segments].join('/'));
+			const leafSegment = segments[segments.length - 1] ?? (sanitizeFileName(projectName) || projectId);
+			return { folderPath, fileName: `${leafSegment}.md` };
+		}
+
+		return null;
+	}
+
+	/**
+	 * Moves an existing project note (and its containing folder in folder-notes mode) to the
+	 * location dictated by the current settings. Called after updateProjectNoteIfRenamed so that
+	 * notes created before useProjectNoteSubfolders was enabled are migrated on the next sync.
+	 */
+	private async relocateProjectNoteIfNeeded(
+		file: TFile,
+		projectId: string,
+		projectName: string,
+		projectNameById: Map<string, string>,
+		projectParentIdById: Map<string, string | null>,
+	): Promise<void> {
+		const expected = this.computeProjectNotePath(projectId, projectName, projectNameById, projectParentIdById);
+		if (!expected) return;
+
+		const expectedFilePath = normalizePath(`${expected.folderPath}/${expected.fileName}`);
+		if (normalizePath(file.path) === expectedFilePath) return;
+
+		// Detect folder-notes structure: file is inside a folder with the same base name
+		const isFolderNote = file.parent instanceof TFolder && file.parent.name === file.basename;
+
+		if (isFolderNote && file.parent instanceof TFolder) {
+			const currentFolder = file.parent;
+			const targetFolderPath = expected.folderPath;
+			if (normalizePath(currentFolder.path) === targetFolderPath) {
+				// Folder is already correct; rename the inner file if needed
+				if (file.name !== expected.fileName) {
+					const newFilePath = normalizePath(`${targetFolderPath}/${expected.fileName}`);
+					if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+						await this.app.fileManager.renameFile(file, newFilePath);
+					}
+				}
+				return;
+			}
+			if (this.app.vault.getAbstractFileByPath(targetFolderPath)) return; // Conflict — skip
+			const parentOfTarget = targetFolderPath.includes('/')
+				? targetFolderPath.slice(0, targetFolderPath.lastIndexOf('/'))
+				: '';
+			if (parentOfTarget) await this.ensureFolderExists(parentOfTarget);
+			await this.app.fileManager.renameFile(currentFolder, targetFolderPath);
+			// After the folder move, rename the inner file if its name is also wrong
+			if (file.name !== expected.fileName) {
+				const newFilePath = normalizePath(`${targetFolderPath}/${expected.fileName}`);
+				if (!this.app.vault.getAbstractFileByPath(newFilePath)) {
+					await this.app.fileManager.renameFile(file, newFilePath);
+				}
+			}
+		} else {
+			if (this.app.vault.getAbstractFileByPath(expectedFilePath)) return; // Conflict — skip
+			await this.ensureFolderExists(expected.folderPath);
+			await this.app.fileManager.renameFile(file, expectedFilePath);
+		}
+	}
+
 	private async ensureProjectNote(
 		projectId: string,
 		projectName: string,
@@ -387,46 +529,25 @@ export class TaskNoteRepository {
 		if (projectIndex.has(projectId)) {
 			const file = projectIndex.get(projectId)!;
 			await this.updateProjectNoteIfRenamed(file, projectId, projectName, projectNameById, projectParentIdById, projectColor);
+			await this.relocateProjectNoteIfNeeded(file, projectId, projectName, projectNameById, projectParentIdById);
 			return file;
 		}
 
 		const now = new Date();
 		const p = getPropNames(this.settings);
-		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
+
+		const refNamesForNote = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+		const refRootIdForNote = refNamesForNote.size > 0
+			? findReferenceRootId(projectId, projectNameById, projectParentIdById, refNamesForNote)
+			: null;
+		const isReferenceForNote = refRootIdForNote !== null && !!this.settings.referenceNotesFolderPath?.trim();
 
 		const areaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
 		const isAreaForPath = areaNames.size > 0 && areaNames.has(projectName.toLowerCase());
-		const effectiveProjectFolder = (isAreaForPath && this.settings.areaNotesFolderPath?.trim())
-			? this.settings.areaNotesFolderPath
-			: this.settings.projectNotesFolderPath;
 
-		let folderPath: string;
-		let fileName: string;
-		if (effectiveProjectFolder?.trim()) {
-			const sanitizedName = buildSanitizedProjectFolderName(projectId, projectName, projectNameById);
-			const baseFolderPath = normalizePath(resolveTemplateVars(effectiveProjectFolder));
-			if (this.settings.useProjectNoteSubfolders && !isAreaForPath) {
-				const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);
-				const nestedBase = normalizePath([baseFolderPath, ...segments.slice(0, -1)].join('/'));
-				if (this.settings.useProjectFolderNotes) {
-					folderPath = normalizePath(`${nestedBase}/${sanitizedName}`);
-				} else {
-					folderPath = nestedBase;
-				}
-			} else if (this.settings.useProjectFolderNotes && !isAreaForPath) {
-				folderPath = normalizePath(`${baseFolderPath}/${sanitizedName}`);
-			} else {
-				folderPath = baseFolderPath;
-			}
-			fileName = `${sanitizedName}.md`;
-		} else if (this.settings.useProjectSubfolders) {
-			const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);
-			folderPath = normalizePath([resolvedFolder, ...segments].join('/'));
-			const leafSegment = segments[segments.length - 1] ?? (sanitizeFileName(projectName) || projectId);
-			fileName = `${leafSegment}.md`;
-		} else {
-			return null; // No sensible path without project subfolders
-		}
+		const pathResult = this.computeProjectNotePath(projectId, projectName, projectNameById, projectParentIdById);
+		if (!pathResult) return null;
+		const { folderPath, fileName } = pathResult;
 
 		await this.ensureFolderExists(folderPath);
 		const filePath = normalizePath(`${folderPath}/${fileName}`);
@@ -441,7 +562,9 @@ export class TaskNoteRepository {
 		const todoistUrl = buildTodoistProjectUrl(projectId, this.settings);
 		const context: ProjectTemplateContext = { project_name: projectName, project_id: projectId, url: todoistUrl };
 		let content: string;
-		if (isAreaForPath && this.settings.areaProjectNoteTemplate?.trim()) {
+		if (isReferenceForNote && this.settings.referenceProjectNoteTemplate?.trim()) {
+			content = resolveTemplateVars(this.settings.referenceProjectNoteTemplate, now, context);
+		} else if (isAreaForPath && this.settings.areaProjectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.areaProjectNoteTemplate, now, context);
 		} else if (this.settings.projectNoteTemplate?.trim()) {
 			content = resolveTemplateVars(this.settings.projectNoteTemplate, now, context);
@@ -691,8 +814,8 @@ export class TaskNoteRepository {
 	}
 
 	async listSyncedTasks(): Promise<SyncedTaskEntry[]> {
-		const { taskIndex, duplicateTaskIds } = this.buildVaultIndexes();
-		this.emitDuplicateIdWarnings(duplicateTaskIds);
+		const { taskIndex, duplicateTaskFiles } = this.buildVaultIndexes();
+		await this.autoResolveDuplicateIds(duplicateTaskFiles, taskIndex);
 		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
@@ -834,8 +957,13 @@ export class TaskNoteRepository {
 				const archivePrefix = `${resolvedProjectArchive}/`;
 				if (file.path !== resolvedProjectArchive && !file.path.startsWith(archivePrefix)) {
 					await this.ensureFolderExists(resolvedProjectArchive);
-					if (this.settings.useProjectFolderNotes && this.settings.projectNotesFolderPath?.trim() && file.parent instanceof TFolder) {
-						// Folder notes: move the parent subfolder (contains the note and any other files)
+					const archRefNames = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+					const archRefRootId = archRefNames.size > 0
+						? findReferenceRootId(project.id, projectNameById, projectParentIdById, archRefNames)
+						: null;
+					const isArchiveRefProject = archRefRootId !== null && !!this.settings.referenceNotesFolderPath?.trim();
+					if ((isArchiveRefProject || (this.settings.useProjectFolderNotes && this.settings.projectNotesFolderPath?.trim())) && file.parent instanceof TFolder) {
+						// Folder notes / reference: move the parent subfolder (contains the note and any other files)
 						const targetFolderPath = normalizePath(`${resolvedProjectArchive}/${file.parent.name}`);
 						if (!this.app.vault.getAbstractFileByPath(targetFolderPath)) {
 							await this.app.fileManager.renameFile(file.parent, targetFolderPath);
@@ -943,6 +1071,31 @@ export class TaskNoteRepository {
 			// Determine target note path (mirrors ensureProjectNote logic)
 			const segments = buildProjectFolderSegments(project.id, projectNameById, projectParentIdById);
 			const leafSegment = segments[segments.length - 1] ?? (sanitizeFileName(project.name) || project.id);
+
+			// Reference project unarchive: restore the whole project folder
+			const unarchivedRefNames = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+			const unarchivedRefRootId = unarchivedRefNames.size > 0
+				? findReferenceRootId(project.id, projectNameById, projectParentIdById, unarchivedRefNames)
+				: null;
+			if (unarchivedRefRootId && this.settings.referenceNotesFolderPath?.trim()) {
+				const refBase = normalizePath(resolveTemplateVars(this.settings.referenceNotesFolderPath));
+				const refSegments = buildProjectFolderSegmentsFrom(project.id, unarchivedRefRootId, projectNameById, projectParentIdById);
+				const parentRefSegments = refSegments.slice(0, -1);
+				const nestedBase = parentRefSegments.length > 0
+					? normalizePath([refBase, ...parentRefSegments].join('/'))
+					: refBase;
+				await this.ensureFolderExists(nestedBase);
+				const sanitizedName = buildSanitizedProjectFolderName(project.id, project.name, projectNameById);
+				const targetFolderPath = normalizePath(`${nestedBase}/${sanitizedName}`);
+				if (file.parent instanceof TFolder && file.parent.path !== targetFolderPath) {
+					if (!this.app.vault.getAbstractFileByPath(targetFolderPath)) {
+						await this.app.fileManager.renameFile(file.parent, targetFolderPath);
+						moved += 1;
+					}
+				}
+				continue;
+			}
+
 			const unarchivedAreaNames = parseCommaSeparatedNameSet(this.settings.areaProjectNames);
 			const isUnarchivedArea = unarchivedAreaNames.size > 0 && unarchivedAreaNames.has(project.name.toLowerCase());
 			const unarchivedEffectiveFolder = (isUnarchivedArea && this.settings.areaNotesFolderPath?.trim())
@@ -1814,13 +1967,13 @@ export class TaskNoteRepository {
 		projectIndex: Map<string, TFile>;
 		sectionIndex: Map<string, TFile>;
 		vaultIdIndex: Map<string, TFile>;
-		duplicateTaskIds: Set<string>;
+		duplicateTaskFiles: Map<string, TFile[]>;
 	} {
 		const taskIndex = new Map<string, TFile>();
 		const projectIndex = new Map<string, TFile>();
 		const sectionIndex = new Map<string, TFile>();
 		const vaultIdIndex = new Map<string, TFile>();
-		const duplicateTaskIds = new Set<string>();
+		const allFilesById = new Map<string, TFile[]>();
 		const p = getPropNames(this.settings);
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
@@ -1838,9 +1991,11 @@ export class TaskNoteRepository {
 				taskId = String(rawId);
 			}
 			if (taskId) {
-				if (taskIndex.has(taskId)) {
-					duplicateTaskIds.add(taskId);
+				const existing = allFilesById.get(taskId);
+				if (existing) {
+					existing.push(file);
 				} else {
+					allFilesById.set(taskId, [file]);
 					taskIndex.set(taskId, file);
 				}
 			}
@@ -1898,7 +2053,14 @@ export class TaskNoteRepository {
 			}
 		}
 
-		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskIds };
+		const duplicateTaskFiles = new Map<string, TFile[]>();
+		for (const [id, files] of allFilesById) {
+			if (files.length > 1) {
+				duplicateTaskFiles.set(id, files);
+			}
+		}
+
+		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskFiles };
 	}
 
 	async backfillVaultIds(): Promise<number> {
@@ -1939,16 +2101,47 @@ export class TaskNoteRepository {
 		return backfilled;
 	}
 
-	private emitDuplicateIdWarnings(dupes: Set<string>): void {
-		if (dupes.size === 0) {
+	private async autoResolveDuplicateIds(
+		duplicateTaskFiles: Map<string, TFile[]>,
+		taskIndex: Map<string, TFile>,
+	): Promise<void> {
+		if (duplicateTaskFiles.size === 0) {
 			return;
 		}
-		const ids = Array.from(dupes).join(', ');
-		console.warn(`[obsidian-task-todoist] Duplicate todoist_id values detected in vault: ${ids}`);
-		new Notice(
-			`Task Todoist: ${dupes.size} duplicate todoist_id(s) found in vault. Check console for details.`,
-			8000,
-		);
+
+		const p = getPropNames(this.settings);
+		const resolvedTasksFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
+		let resolved = 0;
+
+		for (const [id, files] of duplicateTaskFiles) {
+			// Pick the best keeper: prefer a file inside the tasks folder, then most recently modified.
+			const inTasksFolder = files.filter(f => f.path.startsWith(resolvedTasksFolder + '/') || f.path.startsWith(resolvedTasksFolder));
+			const candidates = inTasksFolder.length > 0 ? inTasksFolder : files;
+			const keeper = candidates.reduce((best, f) => (f.stat.mtime > best.stat.mtime ? f : best));
+
+			// Update the index to point at the chosen keeper.
+			taskIndex.set(id, keeper);
+
+			// Clear todoist_id from all other files so they're treated as untracked.
+			const others = files.filter(f => f !== keeper);
+			for (const dupe of others) {
+				console.warn(
+					`[obsidian-task-todoist] Duplicate todoist_id ${id}: keeping "${keeper.path}", clearing from "${dupe.path}"`,
+				);
+				await this.app.fileManager.processFrontMatter(dupe, (fm) => {
+					delete fm[p.todoistId];
+				});
+				resolved++;
+			}
+		}
+
+		if (resolved > 0) {
+			notify(
+				this.settings,
+				`Task Todoist: auto-resolved ${resolved} duplicate todoist_id(s). Check console for details.`,
+				6000,
+			);
+		}
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {
@@ -2015,6 +2208,29 @@ export class TaskNoteRepository {
 	): Promise<string> {
 		const resolvedFolder = resolveTemplateVars(this.settings.tasksFolderPath);
 		let folder = normalizePath(resolvedFolder);
+
+		// Reference projects: tasks live inside the project folder alongside the folder note
+		if (projectId && projectNameById.size > 0 && this.settings.referenceNotesFolderPath?.trim()) {
+			const refNames = parseCommaSeparatedNameSet(this.settings.referenceProjectNames ?? '');
+			const refRootId = refNames.size > 0
+				? findReferenceRootId(projectId, projectNameById, projectParentIdById, refNames)
+				: null;
+			if (refRootId) {
+				const segments = buildProjectFolderSegmentsFrom(projectId, refRootId, projectNameById, projectParentIdById);
+				const refBase = resolveTemplateVars(this.settings.referenceNotesFolderPath);
+				let refFolder = normalizePath([refBase, ...segments].join('/'));
+				await this.ensureFolderExists(refFolder);
+				if (this.settings.useSectionSubfolders && sectionId && sectionNameById.size > 0) {
+					const sName = sectionNameById.get(sectionId) ?? sectionName ?? '';
+					const sanitizedSection = buildSanitizedSectionFolderName(sectionId, sName, projectId, sectionNameById, sectionProjectIdById);
+					if (sanitizedSection) {
+						refFolder = normalizePath(`${refFolder}/${sanitizedSection}`);
+						await this.ensureFolderExists(refFolder);
+					}
+				}
+				return refFolder;
+			}
+		}
 
 		if (this.settings.useProjectSubfolders && projectId && projectNameById.size > 0) {
 			const segments = buildProjectFolderSegments(projectId, projectNameById, projectParentIdById);

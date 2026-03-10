@@ -1,4 +1,5 @@
-import { App, Notice, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
+import { App, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
+import { notify } from './notify';
 import type TaskTodoistPlugin from './main';
 import { DEFAULT_PROP_NAMES } from './settings';
 import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
@@ -93,7 +94,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				button.setButtonText('Test connection').onClick(async () => {
 					const result = await this.plugin.testTodoistConnection();
 					const prefix = result.ok ? 'Success:' : 'Failed:';
-					new Notice(`${prefix} ${result.message}`, 6000);
+					notify(this.plugin.settings, `${prefix} ${result.message}`, 6000);
 					this.display();
 				});
 			});
@@ -156,6 +157,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.showConvertButton).onChange(async (value) => {
 					this.plugin.settings.showConvertButton = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(el)
+			.setName('Disable all notifications')
+			.setDesc('Suppress all plugin notices (toasts). Errors will still be logged to the console.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.disableNotifications).onChange(async (value) => {
+					this.plugin.settings.disableNotifications = value;
 					await this.plugin.saveSettings();
 				});
 			});
@@ -299,7 +310,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				button.setButtonText('Sync now').onClick(async () => {
 					const result = await this.plugin.runImportSync();
 					const prefix = result.ok ? 'Success:' : 'Failed:';
-					new Notice(`${prefix} ${result.message}`, 8000);
+					notify(this.plugin.settings, `${prefix} ${result.message}`, 8000);
 					this.display();
 				});
 			});
@@ -709,6 +720,58 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			});
 		areaTemplateSetting.settingEl.style.display =
 			this.plugin.settings.areaProjectNames.trim() ? '' : 'none';
+
+		new Setting(el).setName('Reference projects').setHeading();
+
+		let refTemplateSetting: Setting;
+
+		new Setting(el)
+			.setName('Reference notes folder')
+			.setDesc('Folder for reference project notes and their tasks. Tasks for reference projects are placed inside the project\'s own subfolder alongside its note, not in the default tasks folder.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Reference')
+					.setValue(this.plugin.settings.referenceNotesFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.referenceNotesFolderPath = value.trim();
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 32;
+			});
+
+		new Setting(el)
+			.setName('Reference project names')
+			.setDesc('Comma-separated project names treated as "reference" projects. Sub-projects of these are also treated as reference projects. Their notes and tasks are co-located in the reference folder.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Knowledge Base, Reference')
+					.setValue(this.plugin.settings.referenceProjectNames)
+					.onChange(async (value) => {
+						this.plugin.settings.referenceProjectNames = value;
+						await this.plugin.saveSettings();
+						refTemplateSetting.settingEl.style.display = value.trim() ? '' : 'none';
+					});
+				textArea.inputEl.rows = 2;
+				textArea.inputEl.cols = 36;
+			});
+
+		refTemplateSetting = new Setting(el)
+			.setName('Reference project note template')
+			.setDesc('Full-file template for reference project notes. Available variables: {{project_name}}, {{project_id}}, {{url}}, {{parent_project_link}}, {{parent_project_name}}, {{YYYY}}, {{MM}}, {{DD}}.')
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder('Leave empty to use default project note layout.')
+					.setValue(this.plugin.settings.referenceProjectNoteTemplate)
+					.onChange(async (value) => {
+						this.plugin.settings.referenceProjectNoteTemplate = value;
+						await this.plugin.saveSettings();
+					});
+				textArea.inputEl.rows = 6;
+				textArea.inputEl.cols = 50;
+				textArea.inputEl.style.fontFamily = 'monospace';
+			});
+		refTemplateSetting.settingEl.style.display =
+			this.plugin.settings.referenceProjectNames.trim() ? '' : 'none';
 	}
 
 	// ── Properties ─────────────────────────────────────────────────────────────
@@ -789,7 +852,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					this.plugin.settings.propNames = { ...DEFAULT_PROP_NAMES };
 					await this.plugin.saveSettings();
 					this.display();
-					new Notice('Property names reset to defaults.', 3000);
+					notify(this.plugin.settings, 'Property names reset to defaults.', 3000);
 				});
 			});
 	}

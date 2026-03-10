@@ -1,6 +1,7 @@
-import { MarkdownPostProcessorContext, Notice, Plugin, TFile } from 'obsidian';
+import { MarkdownPostProcessorContext, Plugin, TFile } from 'obsidian';
 import type TaskTodoistPlugin from './main';
 import { toTaskWikiLink } from './task-note-factory';
+import { notify } from './notify';
 
 const UNCHECKED_TASK_LINE_REGEX = /^(\s*[-*+]\s+\[\s\]\s+)(.+)$/;
 
@@ -52,7 +53,7 @@ async function convertInlineTask(
 ): Promise<void> {
 	const file = plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
 	if (!(file instanceof TFile)) {
-		new Notice('Unable to locate source file for task conversion.', 5000);
+		notify(plugin.settings, 'Unable to locate source file for task conversion.', 5000);
 		return;
 	}
 
@@ -67,14 +68,14 @@ async function convertInlineTask(
 
 		const updated = await replaceTaskLineWithLink(plugin, ctx, listItem, file, taskText, createdTaskNote);
 		if (!updated) {
-			new Notice('Task note created, but original task line was not updated.', 6000);
+			notify(plugin.settings, 'Task note created, but original task line was not updated.', 6000);
 			return;
 		}
 
-		new Notice(`Converted task to note: ${createdTaskNote.basename}`, 5000);
+		notify(plugin.settings, `Converted task to note: ${createdTaskNote.basename}`, 5000);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Unknown conversion error';
-		new Notice(`Task conversion failed: ${message}`, 6000);
+		notify(plugin.settings, `Task conversion failed: ${message}`, 6000);
 	}
 }
 

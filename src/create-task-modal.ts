@@ -1,8 +1,9 @@
-import { AbstractInputSuggest, App, Modal, Notice, Setting, TFile, TextComponent, normalizePath } from 'obsidian';
+import { AbstractInputSuggest, App, Modal, Setting, TFile, TextComponent, normalizePath } from 'obsidian';
 import type TaskTodoistPlugin from './main';
 import { formatDueForDisplay, parseInlineTaskDirectives } from './task-directives';
 import type { TodoistProject, TodoistSection } from './todoist-client';
 import { getTaskTitle, getPropNames } from './task-frontmatter';
+import { notify } from './notify';
 
 export class CreateTaskModal extends Modal {
 	private readonly plugin: TaskTodoistPlugin;
@@ -263,7 +264,7 @@ export class CreateTaskModal extends Modal {
 		const enforcedSectionName = this.todoistSectionName;
 
 		if (!finalTitle) {
-			new Notice('Task title is required.', 4000);
+			notify(this.plugin.settings, 'Task title is required.', 4000);
 			return;
 		}
 
@@ -283,7 +284,7 @@ export class CreateTaskModal extends Modal {
 		const parsedSummary = finalRecurrence
 			? ` • Parsed recurrence: ${finalRecurrence}`
 			: (finalDueDate ? ` • Parsed due: ${formatDueForDisplay(finalDueDate)}` : '');
-		new Notice(`Created task note: ${createdFile.basename}${parsedSummary}`, 5000);
+		notify(this.plugin.settings, `Created task note: ${createdFile.basename}${parsedSummary}`, 5000);
 		this.close();
 	}
 

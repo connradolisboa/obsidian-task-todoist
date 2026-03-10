@@ -1,4 +1,5 @@
-import { Editor, MarkdownView, Notice, Plugin, TAbstractFile, TFile, normalizePath } from 'obsidian';
+import { Editor, MarkdownView, Plugin, TAbstractFile, TFile, normalizePath } from 'obsidian';
+import { notify } from './notify';
 import {
 	DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	DEFAULT_SETTINGS,
@@ -191,7 +192,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const editor = view?.editor;
 		if (!editor) {
-			new Notice('No active Markdown editor found.', 5000);
+			notify(this.settings, 'No active Markdown editor found.', 5000);
 			return;
 		}
 
@@ -209,7 +210,7 @@ export default class TaskTodoistPlugin extends Plugin {
 
 		const result = await this.convertChecklistLineByEditorLine(editor, zeroBasedLine);
 		const prefix = result.ok ? 'Success:' : 'Failed:';
-		new Notice(`${prefix} ${result.message}`, 5000);
+		notify(this.settings, `${prefix} ${result.message}`, 5000);
 	}
 
 
@@ -345,7 +346,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			callback: async () => {
 				const result = await this.testTodoistConnection();
 				const prefix = result.ok ? 'Success:' : 'Failed:';
-				new Notice(`${prefix} ${result.message}`, 6000);
+				notify(this.settings, `${prefix} ${result.message}`, 6000);
 			},
 		});
 		this.addCommand({
@@ -354,7 +355,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			callback: async () => {
 				const result = await this.runImportSync();
 				const prefix = result.ok ? 'Success:' : 'Failed:';
-				new Notice(`${prefix} ${result.message}`, 8000);
+				notify(this.settings, `${prefix} ${result.message}`, 8000);
 			},
 		});
 		this.addCommand({
@@ -370,7 +371,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			editorCallback: async (editor) => {
 				const result = await this.convertEditorChecklistLineToTaskNote(editor);
 				const prefix = result.ok ? 'Success:' : 'Failed:';
-				new Notice(`${prefix} ${result.message}`, 6000);
+				notify(this.settings, `${prefix} ${result.message}`, 6000);
 			},
 		});
 	}
@@ -410,12 +411,12 @@ export default class TaskTodoistPlugin extends Plugin {
 
 		if (this.settings.showScheduledSyncNotices) {
 			const prefix = result.ok ? 'Scheduled sync:' : 'Scheduled sync failed:';
-			new Notice(`${prefix} ${result.message}`, result.ok ? 3500 : 5000);
+			notify(this.settings, `${prefix} ${result.message}`, result.ok ? 3500 : 5000);
 			return;
 		}
 
 		if (!result.ok) {
-			new Notice(`Scheduled sync failed: ${result.message}`, 5000);
+			notify(this.settings, `Scheduled sync failed: ${result.message}`, 5000);
 		}
 	}
 

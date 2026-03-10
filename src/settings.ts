@@ -157,6 +157,12 @@ export interface TaskTodoistSettings {
 	createProjectTasks: boolean;
 	// Separate folder for area project notes (overrides projectNotesFolderPath for areas)
 	areaNotesFolderPath: string;
+	// Reference projects: co-locate project notes and their tasks in a shared folder hierarchy
+	referenceProjectNames: string;
+	referenceNotesFolderPath: string;
+	referenceProjectNoteTemplate: string;
+	// Suppress all plugin notices
+	disableNotifications: boolean;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -202,4 +208,8 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	useProjectNoteSubfolders: false,
 	createProjectTasks: false,
 	areaNotesFolderPath: '',
+	referenceProjectNames: '',
+	referenceNotesFolderPath: '',
+	referenceProjectNoteTemplate: '',
+	disableNotifications: false,
 };

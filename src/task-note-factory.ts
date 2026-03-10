@@ -318,6 +318,53 @@ export function buildProjectFolderSegments(
 }
 
 /**
+ * Like buildProjectFolderSegments but only includes the chain from rootId down to
+ * projectId. Useful for building paths relative to a reference root project.
+ */
+export function buildProjectFolderSegmentsFrom(
+	projectId: string,
+	rootId: string,
+	projectNameById: Map<string, string>,
+	projectParentIdById: Map<string, string | null>,
+): string[] {
+	const chain: string[] = [];
+	const visited = new Set<string>();
+	let current: string | null = projectId;
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		chain.unshift(current);
+		if (current === rootId) break;
+		current = projectParentIdById.get(current) ?? null;
+	}
+	return chain.map((id) => {
+		const name = projectNameById.get(id) ?? id;
+		return buildSanitizedProjectFolderName(id, name, projectNameById);
+	});
+}
+
+/**
+ * Walks the parent_id chain from projectId upward. Returns the ID of the first
+ * ancestor (or the project itself) whose lowercased name is in referenceNames,
+ * or null if none found.
+ */
+export function findReferenceRootId(
+	projectId: string,
+	projectNameById: Map<string, string>,
+	projectParentIdById: Map<string, string | null>,
+	referenceNames: Set<string>,
+): string | null {
+	const visited = new Set<string>();
+	let current: string | null = projectId;
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		const name = projectNameById.get(current)?.toLowerCase() ?? '';
+		if (referenceNames.has(name)) return current;
+		current = projectParentIdById.get(current) ?? null;
+	}
+	return null;
+}
+
+/**
  * Sorts projects topologically so that parent projects come before their children.
  * This ensures parent folders are created before child folders during sync.
  */
