@@ -1,4 +1,5 @@
 import { requestUrl } from 'obsidian';
+import { RateLimiter, withRetryOn429 } from './rate-limiter';
 
 export interface TodoistItem {
 	id: string;
@@ -108,9 +109,11 @@ interface TodoistActivitiesResponse {
 
 export class TodoistClient {
 	private readonly token: string;
+	private readonly rateLimiter: RateLimiter;
 
 	constructor(token: string) {
 		this.token = token;
+		this.rateLimiter = new RateLimiter(4);
 	}
 
 	async testConnection(): Promise<{ ok: boolean; message: string }> {
@@ -172,12 +175,13 @@ export class TodoistClient {
 			object_event_types: '["item:deleted"]',
 			count: String(limit),
 		});
-		const response = await requestUrl({
+		await this.rateLimiter.throttle();
+		const response = await withRetryOn429(() => requestUrl({
 			url: `https://api.todoist.com/api/v1/activities?${params.toString()}`,
 			method: 'GET',
 			headers: { Authorization: `Bearer ${this.token}` },
 			throw: false,
-		});
+		}));
 		if (response.status !== 200) {
 			return new Set();
 		}
@@ -338,11 +342,9 @@ export class TodoistClient {
 	}
 
 	private async syncWithBody(params: Record<string, string>) {
-		const body = new URLSearchParams({
-			...params,
-		}).toString();
-
-		return requestUrl({
+		const body = new URLSearchParams({ ...params }).toString();
+		await this.rateLimiter.throttle();
+		return withRetryOn429(() => requestUrl({
 			url: 'https://api.todoist.com/api/v1/sync',
 			method: 'POST',
 			contentType: 'application/x-www-form-urlencoded',
@@ -351,7 +353,7 @@ export class TodoistClient {
 			},
 			body,
 			throw: false,
-		});
+		}));
 	}
 }
 

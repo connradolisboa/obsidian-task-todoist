@@ -16,6 +16,7 @@ import { createTaskConvertOverlayExtension } from './editor-task-convert-overlay
 import { formatDueForDisplay, parseInlineTaskDirectives } from './task-directives';
 import { applyStandardTaskFrontmatter, getPropNames, setTaskStatus, touchModifiedDate } from './task-frontmatter';
 import { resolveTemplateVars } from './template-variables';
+import { VaultIndex } from './vault-index';
 
 export default class TaskTodoistPlugin extends Plugin {
 	settings: TaskTodoistSettings;
@@ -31,6 +32,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	}>();
 	private scheduledSyncIntervalId: number | null = null;
 	private syncInProgress = false;
+	private vaultIndex: VaultIndex | null = null;
 	private syncQueued = false;
 	private lastSyncToken: string | null = null;
 	private readonly statusSyncBusy = new Set<string>();
@@ -41,6 +43,8 @@ export default class TaskTodoistPlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		await this.loadTodoistApiToken();
+		this.vaultIndex = new VaultIndex(this.app, this.settings);
+		this.vaultIndex.register(this.registerEvent.bind(this));
 		this.addSettingTab(new TaskTodoistSettingTab(this.app, this));
 		this.registerCommands();
 		this.registerVaultTaskDirtyTracking();
@@ -64,6 +68,7 @@ export default class TaskTodoistPlugin extends Plugin {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData({ ...this.settings, lastSyncToken: this.lastSyncToken });
+		this.vaultIndex?.updateSettings(this.settings);
 	}
 
 	isSecretStorageAvailable(): boolean {
@@ -149,7 +154,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		}
 
 		try {
-			const service = new SyncService(this.app, this.settings, token, this.lastSyncToken);
+			const service = new SyncService(this.app, this.settings, token, this.lastSyncToken, this.vaultIndex);
 			const result = await service.runImportSync();
 			if (result.syncToken) {
 				this.lastSyncToken = result.syncToken;

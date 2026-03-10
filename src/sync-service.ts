@@ -2,9 +2,10 @@ import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry } from 
 import type { TaskTodoistSettings } from './settings';
 import { filterImportableItems } from './import-rules';
 import { TodoistClient } from './todoist-client';
-import type { TodoistItem } from './todoist-client';
+import type { TodoistItem, TodoistSyncSnapshot } from './todoist-client';
 import type { App } from 'obsidian';
 import { syncLinkedChecklistStates } from './linked-checklist-sync';
+import type { VaultIndex } from './vault-index';
 
 	export interface SyncRunResult {
 	ok: boolean;
@@ -16,6 +17,7 @@ import { syncLinkedChecklistStates } from './linked-checklist-sync';
 	pushedUpdates?: number;
 	linkedChecklistUpdates?: number;
 	syncToken?: string;
+	phaseErrors?: string[];
 }
 
 export class SyncService {
@@ -23,31 +25,56 @@ export class SyncService {
 	private readonly settings: TaskTodoistSettings;
 	private readonly token: string;
 	private readonly lastSyncToken: string | null;
+	private readonly vaultIndex: VaultIndex | null;
 
-	constructor(app: App, settings: TaskTodoistSettings, token: string, lastSyncToken: string | null = null) {
+	constructor(app: App, settings: TaskTodoistSettings, token: string, lastSyncToken: string | null = null, vaultIndex: VaultIndex | null = null) {
 		this.app = app;
 		this.settings = settings;
 		this.token = token;
 		this.lastSyncToken = lastSyncToken;
+		this.vaultIndex = vaultIndex;
 	}
 
 	async runImportSync(): Promise<SyncRunResult> {
+		const todoistClient = new TodoistClient(this.token);
+		const repository = new TaskNoteRepository(this.app, this.settings, this.vaultIndex ?? undefined);
+		const phaseErrors: string[] = [];
+
+		// Phase 1: pre-flight repairs (non-critical — failures don't block sync)
 		try {
-			const todoistClient = new TodoistClient(this.token);
-			const repository = new TaskNoteRepository(this.app, this.settings);
 			await repository.repairMalformedSignatureFrontmatterLines();
 			await repository.backfillVaultIds();
+		} catch (e) {
+			phaseErrors.push(`Pre-flight: ${errorMessage(e)}`);
+		}
 
-			// Deletion check via Activities API: fetch the most recently deleted item IDs.
-			// Both deleted and completed tasks are absent from the full sync response,
-			// so we use the activities log to distinguish true deletions from completions.
-			const recentlyDeletedIds = await todoistClient.fetchRecentlyDeletedTaskIds(50);
+		// Phase 2: fetch recently-deleted IDs (non-critical — fall back to empty set)
+		let recentlyDeletedIds = new Set<string>();
+		try {
+			recentlyDeletedIds = await todoistClient.fetchRecentlyDeletedTaskIds(50);
+		} catch (e) {
+			phaseErrors.push(`Deleted-IDs fetch: ${errorMessage(e)}`);
+		}
 
-			let snapshot = await todoistClient.fetchSyncSnapshot();
-			const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
+		// Phase 3: first snapshot + project lookup (critical — abort if this fails)
+		let snapshot: TodoistSyncSnapshot;
+		try {
+			snapshot = await todoistClient.fetchSyncSnapshot();
+		} catch (e) {
+			const message = errorMessage(e);
+			return { ok: false, message: `Todoist sync failed: ${message}` };
+		}
+		const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
 
-			const pendingLocalCreates = await repository.listPendingLocalCreates();
-			for (const pending of pendingLocalCreates) {
+		// Phase 4: push pending local creates (per-item errors are non-critical)
+		let pendingLocalCreates: Awaited<ReturnType<typeof repository.listPendingLocalCreates>> = [];
+		try {
+			pendingLocalCreates = await repository.listPendingLocalCreates();
+		} catch (e) {
+			phaseErrors.push(`List pending creates: ${errorMessage(e)}`);
+		}
+		for (const pending of pendingLocalCreates) {
+			try {
 				const resolvedProjectId = resolveProjectId(pending.projectId, pending.projectName, projectIdByName);
 				const resolvedSectionId = resolveSectionId(
 					pending.sectionId,
@@ -86,10 +113,20 @@ export class SyncService {
 					});
 				}
 				await repository.markLocalCreateSynced(pending.file, createdTodoistId, pending.syncSignature);
+			} catch (e) {
+				phaseErrors.push(`Create "${pending.title}": ${errorMessage(e)}`);
 			}
+		}
 
-			const pendingLocalUpdates = await repository.listPendingLocalUpdates();
-			for (const pending of pendingLocalUpdates) {
+		// Phase 5: push pending local updates (per-item errors are non-critical)
+		let pendingLocalUpdates: Awaited<ReturnType<typeof repository.listPendingLocalUpdates>> = [];
+		try {
+			pendingLocalUpdates = await repository.listPendingLocalUpdates();
+		} catch (e) {
+			phaseErrors.push(`List pending updates: ${errorMessage(e)}`);
+		}
+		for (const pending of pendingLocalUpdates) {
+			try {
 				const resolvedProjectId = resolveProjectId(pending.projectId, pending.projectName, projectIdByName);
 				const resolvedSectionId = resolveSectionId(
 					pending.sectionId,
@@ -125,28 +162,39 @@ export class SyncService {
 					await repository.recordRecurringCompletion(pending.file, pending.dueDate);
 				}
 				await repository.renameTaskFileToMatchTitle(pending.file, pending.title);
+			} catch (e) {
+				phaseErrors.push(`Update "${pending.title}": ${errorMessage(e)}`);
 			}
+		}
 
+		// Phase 6: second snapshot post-push (critical — abort if this fails)
+		try {
 			snapshot = await todoistClient.fetchSyncSnapshot();
-			const activeItemById = new Map<string, TodoistItem>(snapshot.items.map((item) => [item.id, item]));
+		} catch (e) {
+			const message = errorMessage(e);
+			const errorSuffix = phaseErrors.length > 0 ? ` Prior errors: ${phaseErrors.join('; ')}` : '';
+			return { ok: false, message: `Todoist sync failed (post-push snapshot): ${message}.${errorSuffix}` };
+		}
+		const activeItemById = new Map<string, TodoistItem>(snapshot.items.map((item) => [item.id, item]));
+		const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
+		const sectionProjectIdById = new Map(snapshot.sections.map((section) => [section.id, section.project_id]));
+		const importableItems = filterImportableItems(
+			snapshot.items,
+			snapshot.projects,
+			this.settings,
+			snapshot.userId,
+			sectionNameById,
+		);
+		const importableWithAncestors = includeAncestorTasks(importableItems, snapshot.items);
+		const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
+		const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
+		const projectColorById = new Map(snapshot.projects.map((project) => [project.id, project.color]));
 
-			const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
-			const sectionProjectIdById = new Map(snapshot.sections.map((section) => [section.id, section.project_id]));
-			const importableItems = filterImportableItems(
-				snapshot.items,
-				snapshot.projects,
-				this.settings,
-				snapshot.userId,
-				sectionNameById,
-			);
-			const importableWithAncestors = includeAncestorTasks(importableItems, snapshot.items);
-
-			const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
-			const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
-			const projectColorById = new Map(snapshot.projects.map((project) => [project.id, project.color]));
-
-			const existingSyncedTasks = await repository.listSyncedTasks();
-
+		// Phase 7: import/upsert task notes (non-critical — degraded sync still useful)
+		let taskResult = { created: 0, updated: 0 };
+		let existingSyncedTasks: SyncedTaskEntry[] = [];
+		try {
+			existingSyncedTasks = await repository.listSyncedTasks();
 			const itemsToUpsertById = new Map(importableWithAncestors.filter((item) => !item.is_deleted).map((item) => [item.id, item]));
 			for (const entry of existingSyncedTasks) {
 				const remoteItem = activeItemById.get(entry.todoistId);
@@ -154,8 +202,7 @@ export class SyncService {
 					itemsToUpsertById.set(remoteItem.id, remoteItem);
 				}
 			}
-
-			const taskResult = await repository.syncItems(Array.from(itemsToUpsertById.values()), {
+			taskResult = await repository.syncItems(Array.from(itemsToUpsertById.values()), {
 				projectNameById,
 				sectionNameById,
 				sectionProjectIdById,
@@ -164,68 +211,99 @@ export class SyncService {
 				allProjects: snapshot.projects.filter((p) => !p.is_archived),
 				allSections: snapshot.sections.filter((s) => !s.is_archived),
 			});
+		} catch (e) {
+			phaseErrors.push(`Import: ${errorMessage(e)}`);
+		}
 
+		// Phase 8: handle missing/deleted remote tasks (non-critical)
+		let missingHandled = 0;
+		try {
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById, recentlyDeletedIds);
-			const missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
+			missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
+		} catch (e) {
+			phaseErrors.push(`Missing tasks: ${errorMessage(e)}`);
+		}
 
-			// Create Todoist tasks for project notes that are pending task creation
-			let projectTasksCreated = 0;
-			if (this.settings.createProjectTasks) {
+		// Phase 9: create Todoist tasks for pending project notes (non-critical, per-item)
+		let projectTasksCreated = 0;
+		if (this.settings.createProjectTasks) {
+			try {
 				const pendingProjectTasks = await repository.listPendingProjectTaskCreates();
 				for (const pending of pendingProjectTasks) {
-					const dueDate = pending.dueDate?.trim() || undefined;
-					const dueString = pending.dueString?.trim() || undefined;
-					const deadline = pending.deadline?.trim() || undefined;
-					const vaultName = encodeURIComponent(this.app.vault.getName());
-					const filePath = encodeURIComponent(pending.file.path);
-					const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
-					const createdTaskId = await todoistClient.createTask({
-						content: `${pending.projectName} [note](${obsidianUri})`,
-						description: pending.description || undefined,
-						projectId: pending.projectId,
-						priority: pending.priority,
-						labels: pending.labels,
-						dueDate,
-						dueString,
-						deadline,
-						duration: pending.duration,
-					});
-					await repository.markProjectTaskCreated(pending.file, createdTaskId);
-					projectTasksCreated += 1;
+					try {
+						const dueDate = pending.dueDate?.trim() || undefined;
+						const dueString = pending.dueString?.trim() || undefined;
+						const deadline = pending.deadline?.trim() || undefined;
+						const vaultName = encodeURIComponent(this.app.vault.getName());
+						const filePath = encodeURIComponent(pending.file.path);
+						const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+						const createdTaskId = await todoistClient.createTask({
+							content: `${pending.projectName} [note](${obsidianUri})`,
+							description: pending.description || undefined,
+							projectId: pending.projectId,
+							priority: pending.priority,
+							labels: pending.labels,
+							dueDate,
+							dueString,
+							deadline,
+							duration: pending.duration,
+						});
+						await repository.markProjectTaskCreated(pending.file, createdTaskId);
+						projectTasksCreated += 1;
+					} catch (e) {
+						phaseErrors.push(`Project task "${pending.projectName}": ${errorMessage(e)}`);
+					}
 				}
+			} catch (e) {
+				phaseErrors.push(`List project task creates: ${errorMessage(e)}`);
 			}
+		}
 
+		// Phase 10: archive/unarchive project and section notes (non-critical)
+		try {
 			const archivedProjects = snapshot.projects.filter((p) => p.is_archived);
 			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
+			await repository.applyArchivedProjectsAndSections(archivedProjects, archivedSections, projectNameById, projectParentIdById, sectionProjectIdById, sectionNameById);
+		} catch (e) {
+			phaseErrors.push(`Archive: ${errorMessage(e)}`);
+		}
+		try {
 			const unarchivedProjects = snapshot.projects.filter((p) => !p.is_archived);
 			const unarchivedSections = snapshot.sections.filter((s) => !s.is_archived);
-			await repository.applyArchivedProjectsAndSections(archivedProjects, archivedSections, projectNameById, projectParentIdById, sectionProjectIdById, sectionNameById);
 			await repository.applyUnarchivedProjectsAndSections(unarchivedProjects, unarchivedSections, projectNameById, projectParentIdById, sectionProjectIdById, sectionNameById);
-
-			const linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
-
-			const ancestorCount = importableWithAncestors.length - importableItems.length;
-			const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
-			const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}.`;
-			return {
-				ok: true,
-				message,
-				imported: importableWithAncestors.length,
-				created: taskResult.created,
-				updated: taskResult.updated,
-				missingHandled,
-				pushedUpdates: pendingLocalUpdates.length,
-				linkedChecklistUpdates,
-				syncToken: snapshot.syncToken || undefined,
-			};
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown sync error';
-			return {
-				ok: false,
-				message: `Todoist sync failed: ${message}`,
-			};
+		} catch (e) {
+			phaseErrors.push(`Unarchive: ${errorMessage(e)}`);
 		}
+
+		// Phase 11: sync linked checklist states (non-critical)
+		let linkedChecklistUpdates = 0;
+		try {
+			linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
+		} catch (e) {
+			phaseErrors.push(`Checklist sync: ${errorMessage(e)}`);
+		}
+
+		const ancestorCount = importableWithAncestors.length - importableItems.length;
+		const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
+		const errorSuffix = phaseErrors.length > 0 ? ` [${phaseErrors.length} phase error(s): ${phaseErrors.join('; ')}]` : '';
+		const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}.${errorSuffix}`;
+		return {
+			ok: phaseErrors.length === 0,
+			message,
+			imported: importableWithAncestors.length,
+			created: taskResult.created,
+			updated: taskResult.updated,
+			missingHandled,
+			pushedUpdates: pendingLocalUpdates.length,
+			linkedChecklistUpdates,
+			syncToken: snapshot.syncToken || undefined,
+			phaseErrors: phaseErrors.length > 0 ? phaseErrors : undefined,
+		};
 	}
+}
+
+function errorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
 }
 
 function findMissingEntries(

@@ -30,6 +30,7 @@ import {
 } from './task-note-factory';
 import { resolveTemplateVars, ProjectTemplateContext, SectionTemplateContext } from './template-variables';
 import { buildRecurrenceString } from './todoist-rrule';
+import { type VaultIndex, buildVaultIndexSnapshot, type VaultIndexSnapshot } from './vault-index';
 
 interface ProjectSectionMaps {
 	projectNameById: Map<string, string>;
@@ -124,10 +125,12 @@ export interface PendingLocalUpdate {
 export class TaskNoteRepository {
 	private readonly app: App;
 	private readonly settings: TaskTodoistSettings;
+	private readonly vaultIndex: VaultIndex | undefined;
 
-	constructor(app: App, settings: TaskTodoistSettings) {
+	constructor(app: App, settings: TaskTodoistSettings, vaultIndex?: VaultIndex) {
 		this.app = app;
 		this.settings = settings;
+		this.vaultIndex = vaultIndex;
 	}
 
 	async syncItems(items: TodoistItem[], maps: ProjectSectionMaps): Promise<SyncTaskResult> {
@@ -255,6 +258,10 @@ export class TaskNoteRepository {
 		if (this.settings.createProjectNotes && maps.projectParentIdById) {
 			await this.applyParentProjectLinks(projectFileById, maps.projectParentIdById, maps.projectNameById);
 		}
+
+		// Invalidate the shared vault index so subsequent callers get fresh data
+		// after all the creates/renames/updates performed in this method.
+		this.vaultIndex?.invalidate();
 
 		return { created, updated };
 	}
@@ -1032,6 +1039,7 @@ export class TaskNoteRepository {
 			}
 		}
 
+		this.vaultIndex?.invalidate();
 		return moved;
 	}
 
@@ -1229,6 +1237,7 @@ export class TaskNoteRepository {
 			}
 		}
 
+		this.vaultIndex?.invalidate();
 		return moved;
 	}
 
@@ -1882,6 +1891,8 @@ export class TaskNoteRepository {
 	private async applyChildMetadata(todoistIdIndex: Map<string, TFile>, assignments: ParentAssignment[]): Promise<void> {
 		const p = getPropNames(this.settings);
 		const childLinksByParentTodoistId = new Map<string, string[]>();
+
+		// First pass: build child links from the current sync batch assignments.
 		for (const assignment of assignments) {
 			const parentFile = todoistIdIndex.get(assignment.parentTodoistId);
 			const childFile = todoistIdIndex.get(assignment.childTodoistId);
@@ -1891,6 +1902,24 @@ export class TaskNoteRepository {
 			const next = childLinksByParentTodoistId.get(assignment.parentTodoistId) ?? [];
 			next.push(toWikiLink(childFile.path));
 			childLinksByParentTodoistId.set(assignment.parentTodoistId, next);
+		}
+
+		// Second pass: reconstruct children from vault frontmatter for tasks that were
+		// synced in a previous run and are not in the current batch's assignments.
+		// Without this, parents not touched in this sync run would have their child
+		// lists cleared because childLinksByParentTodoistId would be empty for them.
+		for (const [, file] of todoistIdIndex) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			const parentId = typeof fm?.[p.todoistParentId] === 'string' ? (fm[p.todoistParentId] as string).trim() : '';
+			if (!parentId || !todoistIdIndex.has(parentId)) {
+				continue;
+			}
+			const link = toWikiLink(file.path);
+			const existing = childLinksByParentTodoistId.get(parentId) ?? [];
+			if (!existing.includes(link)) {
+				existing.push(link);
+				childLinksByParentTodoistId.set(parentId, existing);
+			}
 		}
 
 		for (const [todoistId, file] of todoistIdIndex) {
@@ -1962,105 +1991,16 @@ export class TaskNoteRepository {
 		}
 	}
 
-	private buildVaultIndexes(): {
-		taskIndex: Map<string, TFile>;
-		projectIndex: Map<string, TFile>;
-		sectionIndex: Map<string, TFile>;
-		vaultIdIndex: Map<string, TFile>;
-		duplicateTaskFiles: Map<string, TFile[]>;
-	} {
-		const taskIndex = new Map<string, TFile>();
-		const projectIndex = new Map<string, TFile>();
-		const sectionIndex = new Map<string, TFile>();
-		const vaultIdIndex = new Map<string, TFile>();
-		const allFilesById = new Map<string, TFile[]>();
-		const p = getPropNames(this.settings);
-
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-			if (!fm) {
-				continue;
-			}
-
-			// Task index: by todoist_id (vault-wide, not restricted to tasksFolderPath)
-			const rawId = fm[p.todoistId];
-			let taskId: string | null = null;
-			if (typeof rawId === 'string' && rawId.trim()) {
-				taskId = rawId.trim();
-			} else if (typeof rawId === 'number') {
-				taskId = String(rawId);
-			}
-			if (taskId) {
-				const existing = allFilesById.get(taskId);
-				if (existing) {
-					existing.push(file);
-				} else {
-					allFilesById.set(taskId, [file]);
-					taskIndex.set(taskId, file);
-				}
-			}
-
-			// Dual-purpose note: a project note that also represents a Todoist task.
-			// When todoist_project_task_id matches todoist_id (both non-empty), the note
-			// must appear in BOTH taskIndex (already added above) AND projectIndex so that
-			// project operations (rename, archive, parent links) continue to work.
-			const rawProjectTaskId = fm[p.todoistProjectTaskId];
-			const isDualPurposeNote =
-				taskId !== null &&
-				typeof rawProjectTaskId === 'string' &&
-				rawProjectTaskId.trim() !== '' &&
-				rawProjectTaskId.trim() === taskId;
-
-			if (isDualPurposeNote) {
-				// Also index in projectIndex by todoist_project_id
-				const rawProjectId =
-					fm[p.todoistProjectId] ??
-					(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
-				if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
-					projectIndex.set(rawProjectId.trim(), file);
-				}
-			} else if (!taskId) {
-				// Project/section indexes: only index project/section notes (not task notes).
-				// Task notes have todoist_id set; project and section notes never do.
-				// Backward-compat dual-read: old notes use 'project_id'/'section_id' keys.
-				//
-				// IMPORTANT: A note with a section ID is a section note — index it ONLY in
-				// sectionIndex, even if it also has a project ID. Without this guard, section
-				// notes (which store todoist_project_id for the parent project link) would also
-				// appear in projectIndex, causing tasks to link to section notes instead of
-				// their parent project notes ("sections linked in place of projects").
-				const rawSectionId =
-					fm[p.todoistSectionId] ??
-					(p.todoistSectionId !== 'section_id' ? fm['section_id'] : undefined);
-				if (typeof rawSectionId === 'string' && rawSectionId.trim()) {
-					// Section note — only add to section index
-					sectionIndex.set(rawSectionId.trim(), file);
-				} else {
-					// No section ID — may be a project note
-					const rawProjectId =
-						fm[p.todoistProjectId] ??
-						(p.todoistProjectId !== 'project_id' ? fm['project_id'] : undefined);
-					if (typeof rawProjectId === 'string' && rawProjectId.trim()) {
-						projectIndex.set(rawProjectId.trim(), file);
-					}
-				}
-			}
-
-			// Vault ID index: by vault_id frontmatter
-			const rawVaultId = fm[p.vaultId];
-			if (typeof rawVaultId === 'string' && rawVaultId.trim()) {
-				vaultIdIndex.set(rawVaultId.trim(), file);
-			}
+	/**
+	 * Returns the vault index, using the shared VaultIndex cache if available.
+	 * After this call, mutations that add/remove/rename files must call
+	 * `this.vaultIndex?.invalidate()` so the next get() returns fresh data.
+	 */
+	private buildVaultIndexes(): VaultIndexSnapshot {
+		if (this.vaultIndex) {
+			return this.vaultIndex.get();
 		}
-
-		const duplicateTaskFiles = new Map<string, TFile[]>();
-		for (const [id, files] of allFilesById) {
-			if (files.length > 1) {
-				duplicateTaskFiles.set(id, files);
-			}
-		}
-
-		return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskFiles };
+		return buildVaultIndexSnapshot(this.app, this.settings);
 	}
 
 	async backfillVaultIds(): Promise<number> {
