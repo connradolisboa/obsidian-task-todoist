@@ -31,7 +31,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		isRecurring?: boolean;
 	}>();
 	private scheduledSyncIntervalId: number | null = null;
-	private syncInProgress = false;
+	private syncLock: Promise<{ ok: boolean; message: string }> | null = null;
 	private vaultIndex: VaultIndex | null = null;
 	private syncQueued = false;
 	private lastSyncToken: string | null = null;
@@ -138,32 +138,52 @@ export default class TaskTodoistPlugin extends Plugin {
 	}
 
 	async runImportSync(): Promise<{ ok: boolean; message: string }> {
-		if (this.syncInProgress) {
+		if (this.syncLock !== null) {
 			this.syncQueued = true;
 			return { ok: false, message: 'Sync already running. Queued another run.' };
 		}
 
-		this.syncInProgress = true;
-		await this.loadTodoistApiToken();
-		const token = this.todoistApiToken;
-		if (!token) {
-			const result = { ok: false, message: 'No todoist API token is configured.' };
-			this.setLastSync(result.message);
-			this.finishSyncRun();
-			return result;
-		}
-
-		try {
-			const service = new SyncService(this.app, this.settings, token, this.lastSyncToken, this.vaultIndex);
-			const result = await service.runImportSync();
-			if (result.syncToken) {
-				this.lastSyncToken = result.syncToken;
-				await this.saveSettings();
+		const doSync = async (): Promise<{ ok: boolean; message: string }> => {
+			await this.loadTodoistApiToken();
+			const token = this.todoistApiToken;
+			if (!token) {
+				const result = { ok: false, message: 'No todoist API token is configured.' };
+				this.setLastSync(result.message);
+				return result;
 			}
-			this.setLastSync(result.message);
-			return result;
+
+			try {
+				const service = new SyncService(this.app, this.settings, token, this.lastSyncToken, this.vaultIndex);
+				const result = await service.runImportSync();
+				if (result.syncToken) {
+					this.lastSyncToken = result.syncToken;
+					try {
+						await this.saveSettings();
+					} catch (saveErr) {
+						console.error('[TaskTodoist] Failed to persist sync token:', saveErr);
+					}
+				}
+				this.setLastSync(result.message);
+				return result;
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				const result = { ok: false, message: `Sync failed unexpectedly: ${message}` };
+				this.setLastSync(result.message);
+				return result;
+			}
+		};
+
+		this.syncLock = doSync();
+		try {
+			return await this.syncLock;
 		} finally {
-			this.finishSyncRun();
+			this.syncLock = null;
+			if (this.syncQueued) {
+				this.syncQueued = false;
+				void this.runImportSync().catch((err) => {
+					console.error('[TaskTodoist] Queued sync failed:', err);
+				});
+			}
 		}
 	}
 
@@ -340,8 +360,13 @@ export default class TaskTodoistPlugin extends Plugin {
 			return;
 		}
 
-		const token = this.app.secretStorage.getSecret(secretName);
-		this.todoistApiToken = token?.trim() || null;
+		try {
+			const token = this.app.secretStorage.getSecret(secretName);
+			this.todoistApiToken = token?.trim() || null;
+		} catch (err) {
+			console.error('[TaskTodoist] Failed to read API token from secret storage:', err);
+			this.todoistApiToken = null;
+		}
 	}
 
 	private registerCommands(): void {
@@ -409,27 +434,24 @@ export default class TaskTodoistPlugin extends Plugin {
 	}
 
 	private async runScheduledSync(): Promise<void> {
-		const result = await this.runImportSync();
-		if (result.message.startsWith('Sync already running')) {
-			return;
-		}
+		try {
+			const result = await this.runImportSync();
+			if (result.message.startsWith('Sync already running')) {
+				return;
+			}
 
-		if (this.settings.showScheduledSyncNotices) {
-			const prefix = result.ok ? 'Scheduled sync:' : 'Scheduled sync failed:';
-			notify(this.settings, `${prefix} ${result.message}`, result.ok ? 3500 : 5000);
-			return;
-		}
+			if (this.settings.showScheduledSyncNotices) {
+				const prefix = result.ok ? 'Scheduled sync:' : 'Scheduled sync failed:';
+				notify(this.settings, `${prefix} ${result.message}`, result.ok ? 3500 : 5000);
+				return;
+			}
 
-		if (!result.ok) {
-			notify(this.settings, `Scheduled sync failed: ${result.message}`, 5000);
-		}
-	}
-
-	private finishSyncRun(): void {
-		this.syncInProgress = false;
-		if (this.syncQueued) {
-			this.syncQueued = false;
-			void this.runImportSync();
+			if (!result.ok) {
+				notify(this.settings, `Scheduled sync failed: ${result.message}`, 5000);
+			}
+		} catch (err) {
+			console.error('[TaskTodoist] Scheduled sync threw unexpectedly:', err);
+			notify(this.settings, 'Scheduled sync failed with an unexpected error. Check the developer console.', 5000);
 		}
 	}
 
@@ -460,7 +482,7 @@ export default class TaskTodoistPlugin extends Plugin {
 
 		// During sync, just update the tracking map so we have a correct baseline
 		// for the next user-initiated change — then exit without writing.
-		if (this.syncInProgress) {
+		if (this.syncLock !== null) {
 			this.lastKnownTaskStatus.set(file.path, { taskDone: normDone, taskStatus: rawStatus });
 			return;
 		}
@@ -529,7 +551,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		if (!(file instanceof TFile) || file.extension !== 'md') {
 			return;
 		}
-		if (this.syncInProgress) {
+		if (this.syncLock !== null) {
 			return;
 		}
 		if (!this.isTaskFilePath(file.path)) {

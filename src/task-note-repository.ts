@@ -232,9 +232,15 @@ export class TaskNoteRepository {
 			const mapsWithFiles: ProjectSectionMaps = { ...maps, projectFileById, sectionFileById: sectionIndex };
 			const strippedContent = stripObsidianNoteLink(item.content);
 			const itemForObsidian = strippedContent !== item.content ? { ...item, content: strippedContent } : item;
-			const upsertResult = existingFile
-				? await this.updateTaskFile(existingFile, itemForObsidian, mapsWithFiles)
-				: await this.createTaskFile(itemForObsidian, mapsWithFiles);
+			let upsertResult: UpsertResult & { file: TFile };
+			try {
+				upsertResult = existingFile
+					? await this.updateTaskFile(existingFile, itemForObsidian, mapsWithFiles)
+					: await this.createTaskFile(itemForObsidian, mapsWithFiles);
+			} catch (e) {
+				console.error(`[TaskTodoist] Failed to sync task "${item.content}" (${item.id}): ${e instanceof Error ? e.message : String(e)}`);
+				continue;
+			}
 
 			created += upsertResult.created;
 			updated += upsertResult.updated;
@@ -591,7 +597,18 @@ export class TaskNoteRepository {
 				'',
 			].join('\n');
 		}
-		const file = await this.app.vault.create(filePath, content);
+		let file: TFile;
+		try {
+			file = await this.app.vault.create(filePath, content);
+		} catch (e) {
+			// File may have been created by a concurrent operation — re-check path
+			const raceFile = this.app.vault.getAbstractFileByPath(filePath);
+			if (raceFile instanceof TFile) {
+				projectIndex.set(projectId, raceFile);
+				return raceFile;
+			}
+			throw e; // Genuinely failed — propagate
+		}
 		// Always hydrate required frontmatter after creation. When a template is used, the
 		// template may omit IDs or use different property names — hydration guarantees the
 		// vault index can always find this note and rename detection works correctly.
@@ -775,7 +792,18 @@ export class TaskNoteRepository {
 				'',
 			].join('\n');
 		}
-		const file = await this.app.vault.create(filePath, content);
+		let file: TFile;
+		try {
+			file = await this.app.vault.create(filePath, content);
+		} catch (e) {
+			// File may have been created by a concurrent operation — re-check path
+			const raceFile = this.app.vault.getAbstractFileByPath(filePath);
+			if (raceFile instanceof TFile) {
+				sectionIndex.set(sectionId, raceFile);
+				return;
+			}
+			throw e; // Genuinely failed — propagate
+		}
 		// Always hydrate required frontmatter after creation. When a template is used, the
 		// template may omit IDs or use different property names — hydration guarantees the
 		// vault index can always find this note and links are set correctly.
@@ -1563,7 +1591,11 @@ export class TaskNoteRepository {
 		if (desiredPath === file.path) {
 			return file;
 		}
-		await this.app.fileManager.renameFile(file, desiredPath);
+		try {
+			await this.app.fileManager.renameFile(file, desiredPath);
+		} catch (e) {
+			console.error(`[TaskTodoist] Failed to rename task file to "${desiredPath}": ${e instanceof Error ? e.message : String(e)}`);
+		}
 		return file;
 	}
 
@@ -1583,7 +1615,17 @@ export class TaskNoteRepository {
 			maps.sectionNameById,
 		);
 		const markdown = buildNewFileContent(item, maps, this.settings);
-		const file = await this.app.vault.create(filePath, markdown);
+		let file: TFile;
+		try {
+			file = await this.app.vault.create(filePath, markdown);
+		} catch (e) {
+			// File may have been created by a concurrent operation — re-check
+			const raceFile = this.app.vault.getAbstractFileByPath(filePath);
+			if (raceFile instanceof TFile) {
+				return { created: 0, updated: 0, file: raceFile };
+			}
+			throw e; // Genuinely failed — propagate
+		}
 		// When a template is used, hydrate all required frontmatter properties.
 		// The template provides layout/body structure; hydration ensures all sync-critical
 		// properties are correctly set (including wikilinks and signatures not available as tokens).
@@ -2108,7 +2150,14 @@ export class TaskNoteRepository {
 		for (const part of parts) {
 			current = current ? `${current}/${part}` : part;
 			if (!this.app.vault.getAbstractFileByPath(current)) {
-				await this.app.vault.createFolder(current);
+				try {
+					await this.app.vault.createFolder(current);
+				} catch (e) {
+					// Folder may have been created by a concurrent operation — re-check
+					if (!this.app.vault.getAbstractFileByPath(current)) {
+						throw e; // Genuinely failed — propagate
+					}
+				}
 			}
 		}
 	}
