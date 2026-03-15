@@ -139,7 +139,8 @@ export class SyncService {
 				const deadline = pending.deadline?.trim() || undefined;
 				await todoistClient.updateTask({
 					id: pending.todoistId,
-					content: pending.title,
+					// Project task notes are one-way (Obsidian→Todoist): never push the title.
+					...(pending.isProjectTask ? {} : { content: pending.title }),
 					description: pending.description,
 					isDone: pending.isDone,
 					isRecurring: pending.isRecurring,
@@ -161,7 +162,9 @@ export class SyncService {
 				if (pending.isDone && pending.isRecurring && pending.dueDate) {
 					await repository.recordRecurringCompletion(pending.file, pending.dueDate);
 				}
-				await repository.renameTaskFileToMatchTitle(pending.file, pending.title);
+				if (!pending.isProjectTask) {
+					await repository.renameTaskFileToMatchTitle(pending.file, pending.title);
+				}
 			} catch (e) {
 				phaseErrors.push(`Update "${pending.title}": ${errorMessage(e)}`);
 			}
@@ -238,7 +241,7 @@ export class SyncService {
 						const filePath = encodeURIComponent(pending.file.path);
 						const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 						const createdTaskId = await todoistClient.createTask({
-							content: `${pending.projectName} [note](${obsidianUri})`,
+							content: `* ${pending.projectName} [note](${obsidianUri})`,
 							description: pending.description || undefined,
 							projectId: pending.projectId,
 							priority: pending.priority,

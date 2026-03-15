@@ -75,7 +75,7 @@ export interface TodoistCreateTaskInput {
 
 export interface TodoistTaskUpdateInput {
 	id: string;
-	content: string;
+	content?: string;
 	description?: string;
 	isDone: boolean;
 	isRecurring?: boolean;
@@ -284,7 +284,7 @@ export class TodoistClient {
 			uuid: updateCommandId,
 			args: {
 				id: input.id,
-				content: input.content,
+				...(input.content !== undefined ? { content: input.content } : {}),
 				description: input.description ?? '',
 				...(input.projectId ? { project_id: input.projectId } : {}),
 				...(input.sectionId ? { section_id: input.sectionId } : {}),

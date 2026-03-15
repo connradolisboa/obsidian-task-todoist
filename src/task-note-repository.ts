@@ -120,6 +120,7 @@ export interface PendingLocalUpdate {
 	labels?: string[];
 	deadline?: string;
 	duration?: number;
+	isProjectTask?: boolean;
 }
 
 export class TaskNoteRepository {
@@ -1493,6 +1494,10 @@ export class TaskNoteRepository {
 				continue;
 			}
 
+			const rawPtId = frontmatter[p.todoistProjectTaskId];
+			const ptId = typeof rawPtId === 'string' ? rawPtId.trim() : '';
+			const isProjectTask = Boolean(ptId && ptId === todoistId);
+
 			pending.push({
 				file,
 				todoistId,
@@ -1511,6 +1516,7 @@ export class TaskNoteRepository {
 				labels,
 				deadline,
 				duration,
+				isProjectTask,
 			});
 		}
 
@@ -1690,6 +1696,13 @@ export class TaskNoteRepository {
 			typeof rawProjectTaskId === 'string' &&
 			rawProjectTaskId.trim() !== '' &&
 			rawProjectTaskId.trim() === item.id;
+
+		// Project task notes are one-way only (Obsidian → Todoist).
+		// Never overwrite the project note with data from Todoist.
+		// Completion/deletion is still handled by applyMissingRemoteTasks (Phase 8).
+		if (isDualPurpose) {
+			return { created: 0, updated: 0, file };
+		}
 		const lastImportedSignature =
 			typeof cachedFrontmatter?.[p.todoistLastImportedSignature] === 'string'
 				? cachedFrontmatter[p.todoistLastImportedSignature] as string
