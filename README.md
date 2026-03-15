@@ -19,6 +19,7 @@ A powerful two-way sync plugin for [Obsidian](https://obsidian.md/) that bridges
   - [Sync](#sync-tab)
   - [Notes](#notes-tab)
   - [Properties](#properties-tab)
+- [NoteTask Feature](#notetask-feature)
 - [Project and Section Notes](#project-and-section-notes)
 - [Archive Handling](#archive-handling)
 - [Checklist Conversion](#checklist-conversion)
@@ -36,6 +37,7 @@ A powerful two-way sync plugin for [Obsidian](https://obsidian.md/) that bridges
 - **Custom task note templates** — Full control over note structure with variable substitution
 - **Project & section subfolders** — Organize task notes into a folder hierarchy mirroring Todoist
 - **Project & section notes** — Auto-create dedicated notes for each Todoist project and section
+- **NoteTask linking** — Link any Obsidian note to a Todoist task, with automatic title and property syncing
 - **Archive handling** — Multiple strategies for completed and deleted tasks
 - **Checklist conversion** — Turn any unchecked checklist item into a synced task note
 - **Linked checklist sync** — Checklist items linked to task notes stay in sync with task status
@@ -302,6 +304,47 @@ Template variables work in task note templates, project note templates, section 
 | `{{project_id}}` | Parent project ID |
 | `{{project_link}}` | Wikilink to parent project note |
 | All date variables | See above |
+
+---
+
+## NoteTask Feature
+
+The **NoteTask** feature allows you to link any existing Obsidian note to a Todoist task. This is useful when:
+- You want a specific note (not a task note) to have a corresponding Todoist task
+- You want to track areas, projects, or reference documents as tasks
+- You need a single Todoist task that links back to rich Obsidian content
+
+### Creating a NoteTask
+
+There are two ways to create a NoteTask:
+
+#### Manual Creation
+1. Add a `todoist_note_task_id` property to any note's frontmatter (initially empty or with any placeholder)
+2. Run the **Create NoteTask for current note** command
+3. The plugin creates a Todoist task with the note's filename as the title
+
+#### Automatic Creation
+Configure tag-based auto-creation:
+1. In **Settings → Notes → NoteTask**, set **NoteTask auto-create tags** (comma-separated)
+2. Any note with those tags automatically gets a NoteTask created on sync
+3. Use **NoteTask exclude paths** to skip specific folders
+
+### NoteTask Sync
+
+- **Title sync** — If the note's filename changes, the Todoist task title updates automatically
+- **Property sync** — Properties from the note's frontmatter sync to the Todoist task:
+  - Description, priority, due date, deadline, labels, and more
+  - Merge explicit `todoist_labels` with note tags for complete coverage
+- **Deletion handling** — If a NoteTask is deleted in Todoist, the note is marked as `deleted_remote` but not removed
+- **Project assignment** — Infer project from `todoist_project_link` wikilink or default to inbox
+
+### Settings
+
+| Setting | Description |
+|---|---|
+| **Create project notes** | Toggle to enable project task creation when projects are synced |
+| **NoteTask auto-create tags** | Comma-separated tags that trigger automatic NoteTask creation |
+| **NoteTask exclude paths** | Comma-separated folder paths to exclude from auto-creation |
 
 ---
 
