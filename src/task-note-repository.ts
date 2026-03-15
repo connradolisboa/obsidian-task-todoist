@@ -112,6 +112,12 @@ export interface ActiveNoteTaskEntry {
 	file: TFile;
 	noteTaskId: string;
 	noteTitle: string;
+	priority?: number;
+	dueDate?: string;
+	dueString?: string;
+	deadline?: string;
+	description?: string;
+	labels?: string[];
 }
 
 export interface PendingLocalUpdate {
@@ -1534,7 +1540,36 @@ export class TaskNoteRepository {
 				if (syncStatus === 'deleted_remote') continue;
 			}
 
-			active.push({ file, noteTaskId: rawNoteTaskId.trim(), noteTitle: file.basename });
+			// Extract sync properties from frontmatter
+			let priority = toOptionalNumber(fm[p.todoistPriority]);
+			// Fallback to task_priority_label if todoist_priority not set
+			if (priority === undefined && typeof fm[p.todoistPriorityLabel] === 'string') {
+				const labelMap: Record<string, number> = { 'High': 4, 'Medium': 3, 'Low': 2, 'None': 1 };
+				const label = (fm[p.todoistPriorityLabel] as string).trim();
+				priority = labelMap[label];
+			}
+			const dueDate = typeof fm[p.todoistDue] === 'string' ? (fm[p.todoistDue] as string).trim() || undefined : undefined;
+			const dueString = typeof fm[p.todoistDueString] === 'string' ? (fm[p.todoistDueString] as string).trim() || undefined : undefined;
+			const deadline = typeof fm[p.todoistDeadline] === 'string' ? (fm[p.todoistDeadline] as string).trim() || undefined : undefined;
+			const description = typeof fm[p.todoistDescription] === 'string' ? (fm[p.todoistDescription] as string) : undefined;
+
+			// Merge explicit labels with note tags
+			const explicitLabels = typeof fm[p.todoistLabels] === 'string' ? (fm[p.todoistLabels] as string).split(',').map(l => l.trim()).filter(l => l) : [];
+			const noteTags = Array.isArray(fm[p.tags]) ? (fm[p.tags] as string[]).map(t => t.trim()).filter(t => t) : [];
+			const allLabels = Array.from(new Set([...explicitLabels, ...noteTags])); // Deduplicate
+			const labels = allLabels.length > 0 ? allLabels : undefined;
+
+			active.push({
+				file,
+				noteTaskId: rawNoteTaskId.trim(),
+				noteTitle: file.basename,
+				priority,
+				dueDate,
+				dueString,
+				deadline,
+				description,
+				labels: labels?.length ? labels : undefined,
+			});
 		}
 
 		return active;

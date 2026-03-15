@@ -268,7 +268,7 @@ export class SyncService {
 			}
 		}
 
-		// Phase 9b: sync NoteTask titles and detect deletions (non-critical, per-item)
+		// Phase 9b: sync NoteTask titles and properties (non-critical, per-item)
 	let noteTasksUpdated = 0;
 	try {
 		const activeNoteTasks = await repository.listActiveNoteTasks();
@@ -286,8 +286,28 @@ export class SyncService {
 					const filePath = encodeURIComponent(entry.file.path);
 					const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 					const newContent = `${prefix}${entry.noteTitle} [+](${obsidianUri})`;
-					if (newContent !== currentRemoteTitle) {
-						await todoistClient.updateTask({ id: entry.noteTaskId, content: newContent, isDone: false });
+
+					// Build update object with all properties
+					const updatePayload: any = {
+						id: entry.noteTaskId,
+						content: newContent,
+						isDone: false,
+					};
+
+					// Add optional properties if present
+					if (entry.description) updatePayload.description = entry.description;
+					if (entry.priority !== undefined) updatePayload.priority = entry.priority;
+					if (entry.dueDate) updatePayload.dueDate = entry.dueDate.trim();
+					if (entry.dueString) updatePayload.dueString = entry.dueString.trim();
+					if (entry.deadline) updatePayload.deadline = entry.deadline.trim();
+					if (entry.labels) updatePayload.labels = entry.labels;
+
+					// Clear properties if they were removed from the note
+					if (!entry.dueDate && !entry.dueString) updatePayload.clearDue = true;
+					if (!entry.deadline) updatePayload.clearDeadline = true;
+
+					if (newContent !== currentRemoteTitle || entry.description || entry.priority !== undefined || entry.dueDate || entry.dueString || entry.deadline || entry.labels) {
+						await todoistClient.updateTask(updatePayload);
 						noteTasksUpdated += 1;
 					}
 				}
