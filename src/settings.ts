@@ -125,6 +125,7 @@ export interface TaskTodoistSettings {
 	autoImportAllowedProjectNames: string;
 	autoImportRequiredLabel: string;
 	autoImportExcludeLabel: string;
+	autoImportExcludeNotePrefix: boolean;
 	autoImportAssignedToMeOnly: boolean;
 	todoistTokenSecretName: string;
 	// New settings
@@ -181,6 +182,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	autoImportAllowedProjectNames: '',
 	autoImportRequiredLabel: 'obsidian',
 	autoImportExcludeLabel: '',
+	autoImportExcludeNotePrefix: true,
 	autoImportAssignedToMeOnly: true,
 	todoistTokenSecretName: DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	propNames: { ...DEFAULT_PROP_NAMES },

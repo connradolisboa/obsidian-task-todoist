@@ -18,6 +18,7 @@ export function filterImportableItems(
 	const excludedSectionNames = parseNameSet(settings.excludedSectionNames);
 	const requiredLabel = settings.autoImportRequiredLabel.trim().toLowerCase();
 	const excludeLabel = (settings.autoImportExcludeLabel ?? '').trim().toLowerCase();
+	const excludeNotePrefix = settings.autoImportExcludeNotePrefix ?? true;
 
 	return items.filter((item) => {
 		if (item.is_deleted) {
@@ -54,6 +55,10 @@ export function filterImportableItems(
 		}
 
 		if (excludeLabel && labels.includes(excludeLabel)) {
+			return false;
+		}
+
+		if (excludeNotePrefix && item.content.startsWith('* ')) {
 			return false;
 		}
 

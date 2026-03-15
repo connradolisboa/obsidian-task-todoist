@@ -255,6 +255,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(el)
+			.setName('Exclude note tasks (starting with *)')
+			.setDesc('Exclude tasks whose title starts with "* " from import. Use this to mark Todoist tasks as notes that should not be synced.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.autoImportExcludeNotePrefix).onChange(async (value) => {
+					this.plugin.settings.autoImportExcludeNotePrefix = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(el)
 			.setName('Assigned to me only')
 			.setDesc('Only auto import tasks assigned to your todoist account.')
 			.addToggle((toggle) => {
