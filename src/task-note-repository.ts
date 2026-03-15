@@ -102,6 +102,18 @@ export interface PendingProjectTaskCreate {
 	duration?: number;
 }
 
+export interface PendingNoteTaskAutoCreate {
+	file: TFile;
+	title: string;
+	projectId?: string;
+}
+
+export interface ActiveNoteTaskEntry {
+	file: TFile;
+	noteTaskId: string;
+	noteTitle: string;
+}
+
 export interface PendingLocalUpdate {
 	file: TFile;
 	todoistId: string;
@@ -1434,6 +1446,153 @@ export class TaskNoteRepository {
 			data[p.todoistUrl] = todoistUrl;
 			data[p.todoistLastImportedAt] = new Date().toISOString();
 		});
+	}
+
+	/**
+	 * Scans all vault files for notes that should have a NoteTask auto-created.
+	 * Criteria: note has a tag matching noteTaskAutoCreateTags, is not in an excluded path,
+	 * and does not yet have todoist_note_task_id set (missing or empty string only).
+	 */
+	async listPendingNoteTaskAutoCreates(): Promise<PendingNoteTaskAutoCreate[]> {
+		const pending: PendingNoteTaskAutoCreate[] = [];
+		const p = getPropNames(this.settings);
+
+		const autoCreateTags = (this.settings.noteTaskAutoCreateTags ?? '')
+			.split(',')
+			.map((t) => t.trim().replace(/^#/, '').toLowerCase())
+			.filter(Boolean);
+		if (autoCreateTags.length === 0) return pending;
+
+		const excludePaths = (this.settings.noteTaskExcludePaths ?? '')
+			.split(',')
+			.map((p) => normalizePath(p.trim()))
+			.filter(Boolean);
+
+		const autoTagSet = new Set(autoCreateTags);
+
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			// Check excluded paths
+			if (excludePaths.some((ep) => file.path === ep || file.path.startsWith(ep + '/'))) continue;
+
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) continue;
+
+			// Skip if already has a NoteTask (any non-empty value prevents auto-create)
+			const rawNoteTaskId = fm[p.todoistNoteTaskId];
+			if (typeof rawNoteTaskId === 'string' && rawNoteTaskId.trim()) continue;
+
+			// Check tags
+			const rawTags = fm[p.tags];
+			const noteTags: string[] = Array.isArray(rawTags)
+				? (rawTags as unknown[]).map((t) => String(t).replace(/^#/, '').toLowerCase())
+				: typeof rawTags === 'string'
+				? rawTags.split(/[\s,]+/).map((t) => t.replace(/^#/, '').toLowerCase()).filter(Boolean)
+				: [];
+
+			const hasMatchingTag = noteTags.some((t) => autoTagSet.has(t));
+			if (!hasMatchingTag) continue;
+
+			// Resolve project ID from todoist_project_link if present
+			const projectId = this.resolveNoteTaskProjectId(file, fm, p);
+
+			pending.push({ file, title: file.basename, projectId });
+		}
+
+		return pending;
+	}
+
+	/**
+	 * Marks a NoteTask as created by writing its Todoist task ID to the note's frontmatter.
+	 */
+	async markNoteTaskCreated(file: TFile, taskId: string): Promise<void> {
+		const p = getPropNames(this.settings);
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskId] = taskId;
+		});
+	}
+
+	/**
+	 * Returns all notes with an active NoteTask (non-empty todoist_note_task_id,
+	 * and todoist_sync_status is not 'deleted_remote' for notes without todoist_id).
+	 */
+	async listActiveNoteTasks(): Promise<ActiveNoteTaskEntry[]> {
+		const active: ActiveNoteTaskEntry[] = [];
+		const p = getPropNames(this.settings);
+
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) continue;
+
+			const rawNoteTaskId = fm[p.todoistNoteTaskId];
+			if (typeof rawNoteTaskId !== 'string' || !rawNoteTaskId.trim()) continue;
+
+			// Skip notes where NoteTask was marked deleted (only applicable to non-task notes)
+			const rawTodoistId = fm[p.todoistId];
+			const hasTodoistId = typeof rawTodoistId === 'string' && (rawTodoistId as string).trim();
+			if (!hasTodoistId) {
+				const syncStatus = typeof fm[p.todoistSyncStatus] === 'string' ? (fm[p.todoistSyncStatus] as string) : '';
+				if (syncStatus === 'deleted_remote') continue;
+			}
+
+			active.push({ file, noteTaskId: rawNoteTaskId.trim(), noteTitle: file.basename });
+		}
+
+		return active;
+	}
+
+	/**
+	 * Marks a NoteTask as deleted. For notes without todoist_id (not a task note),
+	 * sets todoist_sync_status to 'deleted_remote' to prevent future sync attempts.
+	 * The todoist_note_task_id is preserved (non-empty) to prevent auto-recreate.
+	 */
+	async markNoteTaskDeleted(file: TFile): Promise<void> {
+		const p = getPropNames(this.settings);
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return;
+
+		const rawTodoistId = fm[p.todoistId];
+		const hasTodoistId = typeof rawTodoistId === 'string' && (rawTodoistId as string).trim();
+		if (hasTodoistId) {
+			// This is also a task note — don't touch todoist_sync_status to avoid conflicting
+			// with the task sync state machine. The non-empty todoist_note_task_id is enough
+			// to prevent auto-recreate; we just won't push future title updates.
+			return;
+		}
+
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'deleted_remote';
+		});
+	}
+
+	/**
+	 * Resolves the Todoist project ID for a NoteTask by reading the note's
+	 * todoist_project_link wikilink, finding the project note, and reading its project ID.
+	 */
+	resolveNoteTaskProjectId(
+		file: TFile,
+		fm: Record<string, unknown>,
+		p: ReturnType<typeof getPropNames>,
+	): string | undefined {
+		// 1. Direct project ID on the note (e.g. project notes)
+		const rawProjectId = fm[p.todoistProjectId];
+		if (typeof rawProjectId === 'string' && rawProjectId.trim()) return rawProjectId.trim();
+
+		// 2. Resolve via todoist_project_link wikilink (e.g. task notes linking to their project)
+		const rawLink = fm[p.todoistProjectLink];
+		if (typeof rawLink !== 'string' || !rawLink.trim()) return undefined;
+
+		const match = rawLink.match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/);
+		if (!match) return undefined;
+
+		const linkTarget = match[1]?.trim() ?? '';
+		const linkedFile = this.app.metadataCache.getFirstLinkpathDest(linkTarget, file.path);
+		if (!linkedFile) return undefined;
+
+		const linkedFm = this.app.metadataCache.getFileCache(linkedFile)?.frontmatter as Record<string, unknown> | undefined;
+		if (!linkedFm) return undefined;
+
+		const projectId = linkedFm[p.todoistProjectId];
+		return typeof projectId === 'string' && projectId.trim() ? projectId.trim() : undefined;
 	}
 
 	async listPendingLocalUpdates(): Promise<PendingLocalUpdate[]> {

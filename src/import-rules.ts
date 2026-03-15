@@ -7,6 +7,7 @@ export function filterImportableItems(
 	settings: TaskTodoistSettings,
 	userId: string | null,
 	sectionNameById: Map<string, string> = new Map(),
+	noteTaskIds: Set<string> = new Set(),
 ): TodoistItem[] {
 	if (!settings.autoImportEnabled) {
 		return [];
@@ -22,6 +23,12 @@ export function filterImportableItems(
 
 	return items.filter((item) => {
 		if (item.is_deleted) {
+			return false;
+		}
+
+		// Never import NoteTask items as task notes — they are linked to Obsidian notes
+		// via todoist_note_task_id and managed separately.
+		if (noteTaskIds.has(item.id)) {
 			return false;
 		}
 

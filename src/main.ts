@@ -208,6 +208,74 @@ export default class TaskTodoistPlugin extends Plugin {
 		new CreateTaskModal(this.app, this, initialTitle).open();
 	}
 
+	async createNoteTaskForCurrentNote(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!file) {
+			notify(this.settings, 'No active note.', 4000);
+			return;
+		}
+
+		const p = getPropNames(this.settings);
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const rawNoteTaskId = fm ? fm[p.todoistNoteTaskId] : undefined;
+
+		if (typeof rawNoteTaskId === 'string' && rawNoteTaskId.trim()) {
+			notify(this.settings, 'This note already has a NoteTask linked.', 4000);
+			return;
+		}
+
+		await this.loadTodoistApiToken();
+		const token = this.todoistApiToken;
+		if (!token) {
+			notify(this.settings, 'No Todoist API token configured.', 4000);
+			return;
+		}
+
+		try {
+			// Resolve project: check todoist_project_id directly first (project notes),
+			// then fall back to resolving todoist_project_link wikilink (task notes).
+			let projectId: string | undefined;
+			if (fm) {
+				const rawDirect = fm[p.todoistProjectId];
+				if (typeof rawDirect === 'string' && rawDirect.trim()) {
+					projectId = rawDirect.trim();
+				} else {
+					const rawLink = fm[p.todoistProjectLink];
+					if (typeof rawLink === 'string' && rawLink.trim()) {
+						const match = rawLink.match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/);
+						if (match) {
+							const linkedFile = this.app.metadataCache.getFirstLinkpathDest(match[1]?.trim() ?? '', file.path);
+							if (linkedFile) {
+								const linkedFm = this.app.metadataCache.getFileCache(linkedFile)?.frontmatter as Record<string, unknown> | undefined;
+								const pid = linkedFm?.[p.todoistProjectId];
+								if (typeof pid === 'string' && pid.trim()) projectId = pid.trim();
+							}
+						}
+					}
+				}
+			}
+
+			const vaultName = encodeURIComponent(this.app.vault.getName());
+			const filePath = encodeURIComponent(file.path);
+			const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+
+			const client = new TodoistClient(token);
+			const taskId = await client.createTask({
+				content: `${file.basename} [note](${obsidianUri})`,
+				projectId,
+			});
+
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				(frontmatter as Record<string, unknown>)[p.todoistNoteTaskId] = taskId;
+			});
+
+			notify(this.settings, `NoteTask created for "${file.basename}".`, 4000);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			notify(this.settings, `Failed to create NoteTask: ${message}`, 6000);
+		}
+	}
+
 	async convertEditorChecklistLineToTaskNote(editor: Editor): Promise<{ ok: boolean; message: string }> {
 		const lineNumber = editor.getCursor().line;
 		return this.convertChecklistLineByEditorLine(editor, lineNumber);
@@ -402,6 +470,13 @@ export default class TaskTodoistPlugin extends Plugin {
 				const result = await this.convertEditorChecklistLineToTaskNote(editor);
 				const prefix = result.ok ? 'Success:' : 'Failed:';
 				notify(this.settings, `${prefix} ${result.message}`, 6000);
+			},
+		});
+		this.addCommand({
+			id: 'create-note-task',
+			name: 'Create NoteTask for current note',
+			callback: async () => {
+				await this.createNoteTaskForCurrentNote();
 			},
 		});
 	}

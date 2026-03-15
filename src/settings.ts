@@ -61,6 +61,8 @@ export interface PropNames {
 	todoistProjectTaskId: string;
 	// Task duration in minutes (synced two-way with Todoist)
 	todoistDuration: string;
+	// NoteTask: Todoist task ID linked to any Obsidian note (one-way Obsidian→Todoist)
+	todoistNoteTaskId: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -107,6 +109,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	completeInstances: 'complete_instances',
 	todoistProjectTaskId: 'todoist_project_task_id',
 	todoistDuration: 'todoist_duration',
+	todoistNoteTaskId: 'todoist_note_task_id',
 };
 
 export interface TaskTodoistSettings {
@@ -164,6 +167,10 @@ export interface TaskTodoistSettings {
 	referenceProjectNoteTemplate: string;
 	// Suppress all plugin notices
 	disableNotifications: boolean;
+	// NoteTask: Obsidian tags that trigger auto-create of a NoteTask (comma-separated)
+	noteTaskAutoCreateTags: string;
+	// NoteTask: folder paths excluded from NoteTask auto-create (comma-separated)
+	noteTaskExcludePaths: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -214,4 +221,6 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	referenceNotesFolderPath: '',
 	referenceProjectNoteTemplate: '',
 	disableNotifications: false,
+	noteTaskAutoCreateTags: '',
+	noteTaskExcludePaths: '',
 };

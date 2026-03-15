@@ -8,6 +8,8 @@ export interface VaultIndexSnapshot {
 	sectionIndex: Map<string, TFile>;
 	vaultIdIndex: Map<string, TFile>;
 	duplicateTaskFiles: Map<string, TFile[]>;
+	/** NoteTask index: maps todoist_note_task_id → TFile (vault-wide) */
+	noteTaskIndex: Map<string, TFile>;
 }
 
 /**
@@ -19,6 +21,7 @@ export function buildVaultIndexSnapshot(app: App, settings: TaskTodoistSettings)
 	const projectIndex = new Map<string, TFile>();
 	const sectionIndex = new Map<string, TFile>();
 	const vaultIdIndex = new Map<string, TFile>();
+	const noteTaskIndex = new Map<string, TFile>();
 	const allFilesById = new Map<string, TFile[]>();
 	const p = getPropNames(settings);
 
@@ -97,6 +100,12 @@ export function buildVaultIndexSnapshot(app: App, settings: TaskTodoistSettings)
 		if (typeof rawVaultId === 'string' && rawVaultId.trim()) {
 			vaultIdIndex.set(rawVaultId.trim(), file);
 		}
+
+		// NoteTask index: by todoist_note_task_id frontmatter
+		const rawNoteTaskId = fm[p.todoistNoteTaskId];
+		if (typeof rawNoteTaskId === 'string' && rawNoteTaskId.trim()) {
+			noteTaskIndex.set(rawNoteTaskId.trim(), file);
+		}
 	}
 
 	const duplicateTaskFiles = new Map<string, TFile[]>();
@@ -106,7 +115,7 @@ export function buildVaultIndexSnapshot(app: App, settings: TaskTodoistSettings)
 		}
 	}
 
-	return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskFiles };
+	return { taskIndex, projectIndex, sectionIndex, vaultIdIndex, duplicateTaskFiles, noteTaskIndex };
 }
 
 /**

@@ -594,15 +594,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					});
 			}
 
-			new Setting(el)
-				.setName('Create project task in Todoist')
-				.setDesc('When a project note is first created, also create a task in that Todoist project. Add todoist_due_string, todoist_priority, todoist_labels, or todoist_description to the project note to set task properties before syncing.')
-				.addToggle((toggle) => {
-					toggle.setValue(this.plugin.settings.createProjectTasks).onChange(async (value) => {
-						this.plugin.settings.createProjectTasks = value;
-						await this.plugin.saveSettings();
-					});
-				});
+	
 
 			new Setting(el)
 				.setName('Project note template')
@@ -782,6 +774,47 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			});
 		refTemplateSetting.settingEl.style.display =
 			this.plugin.settings.referenceProjectNames.trim() ? '' : 'none';
+
+		// ── NoteTask ──────────────────────────────────────────────────────────────
+		new Setting(el).setName('NoteTask').setHeading();
+
+		new Setting(el)
+			.setName('Auto-create NoteTask for project notes')
+			.setDesc('When a project note is first created, also create a Todoist task linked to it. Add todoist_due_string, todoist_priority, todoist_labels, or todoist_description to the project note to set task properties before syncing.')
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.createProjectTasks).onChange(async (value) => {
+					this.plugin.settings.createProjectTasks = value;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(el)
+			.setName('Auto-create NoteTask for tagged notes')
+			.setDesc('Comma-separated Obsidian tags (without #). Any note with one of these tags will automatically get a NoteTask created on the next sync. Once created (or deleted in Todoist), it will not be re-created automatically — use the "Create NoteTask for current note" command to do so manually.')
+			.addText((text) => {
+				text
+					.setPlaceholder('project, reference')
+					.setValue(this.plugin.settings.noteTaskAutoCreateTags)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskAutoCreateTags = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 36;
+			});
+
+		new Setting(el)
+			.setName('Exclude paths from NoteTask auto-create')
+			.setDesc('Comma-separated folder paths. Notes inside these folders will not have a NoteTask auto-created by the tags rule above. The manual command still works.')
+			.addText((text) => {
+				text
+					.setPlaceholder('Tasks, Archive')
+					.setValue(this.plugin.settings.noteTaskExcludePaths)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskExcludePaths = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 36;
+			});
 	}
 
 	// ── Properties ─────────────────────────────────────────────────────────────
@@ -844,6 +877,8 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist section ID', 'The remote Todoist section ID. Also used on section notes to identify which section they represent.', 'todoistSectionId');
 		this.addPropNameSetting(el, 'Todoist parent ID', 'The Todoist ID of the parent task.', 'todoistParentId');
 		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
+		this.addPropNameSetting(el, 'Todoist project task ID', 'Todoist task ID for the NoteTask auto-created when a project note is first created.', 'todoistProjectTaskId');
+		this.addPropNameSetting(el, 'Todoist NoteTask ID', 'Todoist task ID for the NoteTask linked to this note (one-way Obsidian→Todoist). Preserved when the task is deleted to prevent auto-recreate.', 'todoistNoteTaskId');
 
 		new Setting(el).setName('Sync tracking').setHeading();
 

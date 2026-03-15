@@ -1,11 +1,11 @@
-import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry } from './task-note-repository';
+import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry, type ActiveNoteTaskEntry } from './task-note-repository';
 import type { TaskTodoistSettings } from './settings';
 import { filterImportableItems } from './import-rules';
 import { TodoistClient } from './todoist-client';
 import type { TodoistItem, TodoistSyncSnapshot } from './todoist-client';
 import type { App } from 'obsidian';
 import { syncLinkedChecklistStates } from './linked-checklist-sync';
-import type { VaultIndex } from './vault-index';
+import { type VaultIndex, buildVaultIndexSnapshot } from './vault-index';
 
 	export interface SyncRunResult {
 	ok: boolean;
@@ -181,12 +181,18 @@ export class SyncService {
 		const activeItemById = new Map<string, TodoistItem>(snapshot.items.map((item) => [item.id, item]));
 		const sectionNameById = new Map(snapshot.sections.map((section) => [section.id, section.name]));
 		const sectionProjectIdById = new Map(snapshot.sections.map((section) => [section.id, section.project_id]));
+		// Build NoteTask ID set so they are excluded from normal task import
+		const noteTaskIds = new Set<string>(
+			(this.vaultIndex ? this.vaultIndex.get() : buildVaultIndexSnapshot(this.app, this.settings)).noteTaskIndex.keys()
+		);
+
 		const importableItems = filterImportableItems(
 			snapshot.items,
 			snapshot.projects,
 			this.settings,
 			snapshot.userId,
 			sectionNameById,
+			noteTaskIds,
 		);
 		const importableWithAncestors = includeAncestorTasks(importableItems, snapshot.items);
 		const projectNameById = new Map(snapshot.projects.map((project) => [project.id, project.name]));
@@ -241,7 +247,7 @@ export class SyncService {
 						const filePath = encodeURIComponent(pending.file.path);
 						const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 						const createdTaskId = await todoistClient.createTask({
-							content: `* ${pending.projectName} [note](${obsidianUri})`,
+							content: `* ${pending.projectName} [+](${obsidianUri})`,
 							description: pending.description || undefined,
 							projectId: pending.projectId,
 							priority: pending.priority,
@@ -262,7 +268,61 @@ export class SyncService {
 			}
 		}
 
-		// Phase 10: archive/unarchive project and section notes (non-critical)
+		// Phase 9b: sync NoteTask titles and detect deletions (non-critical, per-item)
+	let noteTasksUpdated = 0;
+	try {
+		const activeNoteTasks = await repository.listActiveNoteTasks();
+		for (const entry of activeNoteTasks) {
+			try {
+				const remoteItem = activeItemById.get(entry.noteTaskId);
+				if (!remoteItem || remoteItem.is_deleted) {
+					// NoteTask was deleted (or completed) in Todoist — mark it
+					await repository.markNoteTaskDeleted(entry.file);
+				} else {
+					// Push updated title with link, preserving any leading '* ' the user added in Todoist
+					const currentRemoteTitle = remoteItem.content ?? '';
+					const prefix = currentRemoteTitle.startsWith('* ') ? '* ' : '';
+					const vaultName = encodeURIComponent(this.app.vault.getName());
+					const filePath = encodeURIComponent(entry.file.path);
+					const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+					const newContent = `${prefix}${entry.noteTitle} [+](${obsidianUri})`;
+					if (newContent !== currentRemoteTitle) {
+						await todoistClient.updateTask({ id: entry.noteTaskId, content: newContent, isDone: false });
+						noteTasksUpdated += 1;
+					}
+				}
+			} catch (e) {
+				phaseErrors.push(`NoteTask sync "${entry.noteTitle}": ${errorMessage(e)}`);
+			}
+		}
+	} catch (e) {
+		phaseErrors.push(`NoteTask sync: ${errorMessage(e)}`);
+	}
+
+	// Phase 9c: auto-create NoteTasks for tag-matched notes (non-critical, per-item)
+	let noteTasksAutoCreated = 0;
+	try {
+		const pendingNoteTaskCreates = await repository.listPendingNoteTaskAutoCreates();
+		for (const pending of pendingNoteTaskCreates) {
+			try {
+				const vaultName = encodeURIComponent(this.app.vault.getName());
+				const filePath = encodeURIComponent(pending.file.path);
+				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+				const createdTaskId = await todoistClient.createTask({
+					content: `${pending.title} [+](${obsidianUri})`,
+					projectId: pending.projectId,
+				});
+				await repository.markNoteTaskCreated(pending.file, createdTaskId);
+				noteTasksAutoCreated += 1;
+			} catch (e) {
+				phaseErrors.push(`NoteTask auto-create "${pending.title}": ${errorMessage(e)}`);
+			}
+		}
+	} catch (e) {
+		phaseErrors.push(`NoteTask auto-create: ${errorMessage(e)}`);
+	}
+
+	// Phase 10: archive/unarchive project and section notes (non-critical)
 		try {
 			const archivedProjects = snapshot.projects.filter((p) => p.is_archived);
 			const archivedSections = snapshot.sections.filter((s) => s.is_archived);
@@ -288,8 +348,9 @@ export class SyncService {
 
 		const ancestorCount = importableWithAncestors.length - importableItems.length;
 		const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
+		const noteTaskMsg = (noteTasksAutoCreated > 0 || noteTasksUpdated > 0) ? `, ${noteTasksAutoCreated} NoteTask(s) created, ${noteTasksUpdated} NoteTask title(s) updated` : '';
 		const errorSuffix = phaseErrors.length > 0 ? ` [${phaseErrors.length} phase error(s): ${phaseErrors.join('; ')}]` : '';
-		const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}.${errorSuffix}`;
+		const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}${noteTaskMsg}.${errorSuffix}`;
 		return {
 			ok: phaseErrors.length === 0,
 			message,
