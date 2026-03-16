@@ -179,11 +179,15 @@ export class TaskNoteRepository {
 		let created = 0;
 		let updated = 0;
 
+		// Parse exclusion lists
+		const excludedProjectNames = parseCommaSeparatedNameSet(this.settings.excludedProjectNames);
+		const excludedSectionNames = parseCommaSeparatedNameSet(this.settings.excludedSectionNames);
+
 		// Pre-pass: ensure notes for ALL projects and sections (not just those with tasks)
 		if (this.settings.createProjectNotes && maps.allProjects) {
 			const sortedProjects = topologicalSortProjects(maps.allProjects);
 			for (const project of sortedProjects) {
-				if (!seenProjectIds.has(project.id)) {
+				if (!seenProjectIds.has(project.id) && !excludedProjectNames.has(project.name.toLowerCase())) {
 					seenProjectIds.add(project.id);
 					const projectFile = await this.ensureProjectNote(
 						project.id,
@@ -201,7 +205,7 @@ export class TaskNoteRepository {
 		}
 		if (this.settings.createSectionNotes && (this.settings.useProjectSubfolders || !!this.settings.sectionNotesFolderPath?.trim()) && maps.allSections) {
 			for (const section of maps.allSections) {
-				if (!seenSectionIds.has(section.id)) {
+				if (!seenSectionIds.has(section.id) && !excludedSectionNames.has(section.name.toLowerCase())) {
 					seenSectionIds.add(section.id);
 					const projectName = maps.projectNameById.get(section.project_id) ?? 'Unknown';
 					const projectFile = projectFileById.get(section.project_id) ?? null;
@@ -224,37 +228,41 @@ export class TaskNoteRepository {
 		for (const item of items) {
 			// Ensure project/section notes for items not covered by the pre-pass
 			if (this.settings.createProjectNotes && !seenProjectIds.has(item.project_id)) {
-				seenProjectIds.add(item.project_id);
 				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-				const projectFile = await this.ensureProjectNote(
-					item.project_id,
-					projectName,
-					projectIndex,
-					maps.projectNameById,
-					maps.projectParentIdById ?? new Map(),
-					maps.projectColorById?.get(item.project_id) ?? null,
-				);
-				if (projectFile) {
-					projectFileById.set(item.project_id, projectFile);
+				if (!excludedProjectNames.has(projectName.toLowerCase())) {
+					seenProjectIds.add(item.project_id);
+					const projectFile = await this.ensureProjectNote(
+						item.project_id,
+						projectName,
+						projectIndex,
+						maps.projectNameById,
+						maps.projectParentIdById ?? new Map(),
+						maps.projectColorById?.get(item.project_id) ?? null,
+					);
+					if (projectFile) {
+						projectFileById.set(item.project_id, projectFile);
+					}
 				}
 			}
 			if (this.settings.createSectionNotes && (this.settings.useProjectSubfolders || !!this.settings.sectionNotesFolderPath?.trim()) && item.section_id && !seenSectionIds.has(item.section_id)) {
-				seenSectionIds.add(item.section_id);
 				const sectionName = maps.sectionNameById.get(item.section_id) ?? 'Unknown';
-				const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
-				const projectFile = projectFileById.get(item.project_id) ?? null;
-				await this.ensureSectionNote(
-					item.section_id,
-					sectionName,
-					item.project_id,
-					projectName,
-					sectionIndex,
-					projectFile,
-					maps.projectNameById,
-					maps.projectParentIdById ?? new Map(),
-					maps.sectionProjectIdById ?? new Map(),
-					maps.sectionNameById,
-				);
+				if (!excludedSectionNames.has(sectionName.toLowerCase())) {
+					seenSectionIds.add(item.section_id);
+					const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
+					const projectFile = projectFileById.get(item.project_id) ?? null;
+					await this.ensureSectionNote(
+						item.section_id,
+						sectionName,
+						item.project_id,
+						projectName,
+						sectionIndex,
+						projectFile,
+						maps.projectNameById,
+						maps.projectParentIdById ?? new Map(),
+						maps.sectionProjectIdById ?? new Map(),
+						maps.sectionNameById,
+					);
+				}
 			}
 
 			const existingFile = existingByTodoistId.get(item.id);
