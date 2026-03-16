@@ -106,6 +106,10 @@ export interface PendingNoteTaskAutoCreate {
 	file: TFile;
 	title: string;
 	projectId?: string;
+	/** Project name resolved from noteTaskTagProjectMap (fallback when no todoist_project_link). */
+	projectName?: string;
+	/** Section name resolved from noteTaskStatusSectionMap. */
+	sectionName?: string;
 }
 
 export interface ActiveNoteTaskEntry {
@@ -121,6 +125,8 @@ export interface ActiveNoteTaskEntry {
 	deadline?: string;
 	description?: string;
 	labels?: string[];
+	/** Section name resolved from noteTaskStatusSectionMap. */
+	sectionName?: string;
 }
 
 export interface PendingLocalUpdate {
@@ -1479,6 +1485,28 @@ export class TaskNoteRepository {
 
 		const autoTagSet = new Set(autoCreateTags);
 
+		// Build tag→projectName map from settings
+		const tagProjectMap = new Map<string, string>();
+		for (const pair of (this.settings.noteTaskTagProjectMap ?? '').split(',')) {
+			const idx = pair.indexOf(':');
+			if (idx > 0) {
+				const tag = pair.slice(0, idx).trim().replace(/^#/, '').toLowerCase();
+				const projectName = pair.slice(idx + 1).trim();
+				if (tag && projectName) tagProjectMap.set(tag, projectName);
+			}
+		}
+
+		// Build status→sectionName map from settings
+		const statusSectionMap = new Map<string, string>();
+		for (const pair of (this.settings.noteTaskStatusSectionMap ?? '').split(',')) {
+			const idx = pair.indexOf(':');
+			if (idx > 0) {
+				const status = pair.slice(0, idx).trim().toLowerCase();
+				const sectionName = pair.slice(idx + 1).trim();
+				if (status && sectionName) statusSectionMap.set(status, sectionName);
+			}
+		}
+
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			// Check excluded paths
 			if (excludePaths.some((ep) => file.path === ep || file.path.startsWith(ep + '/'))) continue;
@@ -1504,7 +1532,20 @@ export class TaskNoteRepository {
 			// Resolve project ID from todoist_project_link if present
 			const projectId = this.resolveNoteTaskProjectId(file, fm, p);
 
-			pending.push({ file, title: file.basename, projectId });
+			// Fallback: resolve project name from tag→project map
+			let projectName: string | undefined;
+			if (!projectId && tagProjectMap.size > 0) {
+				for (const tag of noteTags) {
+					const mapped = tagProjectMap.get(tag);
+					if (mapped) { projectName = mapped; break; }
+				}
+			}
+
+			// Resolve section name from status→section map
+			const noteStatus = typeof fm[p.taskStatus] === 'string' ? (fm[p.taskStatus] as string).trim().toLowerCase() : '';
+			const sectionName = statusSectionMap.size > 0 ? statusSectionMap.get(noteStatus) : undefined;
+
+			pending.push({ file, title: file.basename, projectId, projectName, sectionName });
 		}
 
 		return pending;
@@ -1527,6 +1568,17 @@ export class TaskNoteRepository {
 	async listActiveNoteTasks(): Promise<ActiveNoteTaskEntry[]> {
 		const active: ActiveNoteTaskEntry[] = [];
 		const p = getPropNames(this.settings);
+
+		// Build status→sectionName map from settings
+		const statusSectionMap = new Map<string, string>();
+		for (const pair of (this.settings.noteTaskStatusSectionMap ?? '').split(',')) {
+			const idx = pair.indexOf(':');
+			if (idx > 0) {
+				const status = pair.slice(0, idx).trim().toLowerCase();
+				const sectionName = pair.slice(idx + 1).trim();
+				if (status && sectionName) statusSectionMap.set(status, sectionName);
+			}
+		}
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
@@ -1567,6 +1619,9 @@ export class TaskNoteRepository {
 			const modified = typeof fm[p.modified] === 'string' ? (fm[p.modified] as string).trim() || undefined : undefined;
 			const noteTaskSyncedAt = typeof fm[p.todoistNoteTaskSyncedAt] === 'string' ? (fm[p.todoistNoteTaskSyncedAt] as string).trim() || undefined : undefined;
 
+			// Resolve section name from status→section map
+			const sectionName = statusSectionMap.size > 0 ? statusSectionMap.get(noteStatus.toLowerCase()) : undefined;
+
 			active.push({
 				file,
 				noteTaskId: rawNoteTaskId.trim(),
@@ -1580,6 +1635,7 @@ export class TaskNoteRepository {
 				deadline,
 				description,
 				labels: labels?.length ? labels : undefined,
+				sectionName,
 			});
 		}
 

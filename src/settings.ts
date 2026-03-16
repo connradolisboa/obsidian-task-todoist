@@ -180,6 +180,10 @@ export interface TaskTodoistSettings {
 	noteTaskDoneStatuses: string;
 	// NoteTask: note statuses that delete the Todoist task and stop re-creation
 	noteTaskStopStatuses: string;
+	// NoteTask: tag→project mapping for auto-create (comma-separated "tag:ProjectName" pairs)
+	noteTaskTagProjectMap: string;
+	// NoteTask: status→section mapping for create and sync (comma-separated "Status:SectionName" pairs)
+	noteTaskStatusSectionMap: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -235,4 +239,6 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	noteTaskTodoStatuses: 'Open,Active,Ongoing,Backlog,Waiting',
 	noteTaskDoneStatuses: '',
 	noteTaskStopStatuses: '',
+	noteTaskTagProjectMap: '',
+	noteTaskStatusSectionMap: '',
 };

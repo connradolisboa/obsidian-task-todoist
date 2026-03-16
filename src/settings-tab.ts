@@ -823,6 +823,20 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				text.inputEl.size = 36;
 			});
 
+		new Setting(el)
+			.setName('Tag → Todoist project')
+			.setDesc('Comma-separated "tag:ProjectName" pairs. When a note has no explicit todoist_project_link, the first matching tag in this list determines which Todoist project the NoteTask is created in. Example: goal:Goals,effort:Efforts')
+			.addText((text) => {
+				text
+					.setPlaceholder('goal:Goals,effort:Efforts')
+					.setValue(this.plugin.settings.noteTaskTagProjectMap)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskTagProjectMap = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
 		new Setting(el).setName('Status mapping').setHeading();
 
 		new Setting(el)
@@ -875,6 +889,20 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.size = 40;
+			});
+
+		new Setting(el)
+			.setName('Status → Todoist section')
+			.setDesc('Comma-separated "Status:SectionName" pairs. When a NoteTask is created or pushed, it is placed in the matching Todoist section inside its project. The section must already exist in Todoist. Example: Active:Active,Ongoing:Ongoing,Backlog:Backlog,Future:Future')
+			.addText((text) => {
+				text
+					.setPlaceholder('Active:Active,Ongoing:Ongoing,Backlog:Backlog,Future:Future')
+					.setValue(this.plugin.settings.noteTaskStatusSectionMap)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskStatusSectionMap = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 50;
 			});
 	}
 

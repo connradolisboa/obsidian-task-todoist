@@ -303,6 +303,11 @@ export class SyncService {
 				const filePath = encodeURIComponent(entry.file.path);
 				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 
+				// Resolve section ID for push based on note status (uses remoteItem.project_id when available)
+				const noteTaskSectionId = entry.sectionName
+					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot)
+					: undefined;
+
 				if (!remoteItem || remoteItem.is_deleted) {
 					// Task absent from active items — check if deleted vs completed
 					const wasDeleted = recentlyDeletedIds.has(entry.noteTaskId);
@@ -330,6 +335,7 @@ export class SyncService {
 								clearDue: !entry.dueDate && !entry.dueString,
 								deadline: entry.deadline?.trim(),
 								clearDeadline: !entry.deadline,
+								sectionId: noteTaskSectionId,
 							});
 							await repository.markNoteTaskSyncedAt(entry.file);
 							noteTasksUpdated += 1;
@@ -372,6 +378,7 @@ export class SyncService {
 						clearDue: !entry.dueDate && !entry.dueString,
 						deadline: entry.deadline?.trim(),
 						clearDeadline: !entry.deadline,
+						sectionId: noteTaskSectionId,
 					});
 					await repository.markNoteTaskSyncedAt(entry.file);
 					noteTasksUpdated += 1;
@@ -424,8 +431,14 @@ export class SyncService {
 				const filePath = encodeURIComponent(pending.file.path);
 				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 
+				// Resolve project: prefer explicit ID, then fall back to name from tag→project map
+				const resolvedNoteTaskProjectId = resolveProjectId(pending.projectId, pending.projectName, projectIdByName);
+
+				// Resolve section from status→section map
+				const resolvedNoteTaskSectionId = resolveSectionId(undefined, pending.sectionName, resolvedNoteTaskProjectId, snapshot);
+
 				// Calculate order to place NoteTask at the top of the project
-				const projectTasks = snapshot.items.filter((item) => item.project_id === pending.projectId && !item.parent_id);
+				const projectTasks = snapshot.items.filter((item) => item.project_id === resolvedNoteTaskProjectId && !item.parent_id);
 				const minOrder = projectTasks.length > 0
 					? Math.min(...projectTasks.map((t) => t.order ?? 0))
 					: 0;
@@ -433,7 +446,8 @@ export class SyncService {
 
 				const createdTaskId = await todoistClient.createTask({
 					content: `${pending.title} [+](${obsidianUri})`,
-					projectId: pending.projectId,
+					projectId: resolvedNoteTaskProjectId,
+					sectionId: resolvedNoteTaskSectionId,
 					order: noteTaskOrder,
 				});
 				await repository.markNoteTaskCreated(pending.file, createdTaskId);
