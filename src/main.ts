@@ -47,6 +47,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		this.vaultIndex.register(this.registerEvent.bind(this));
 		this.addSettingTab(new TaskTodoistSettingTab(this.app, this));
 		this.registerCommands();
+		this.registerRibbonCommands();
 		this.registerVaultTaskDirtyTracking();
 		this.registerStatusBidiSync();
 		registerInlineTaskConverter(this);
@@ -478,6 +479,14 @@ export default class TaskTodoistPlugin extends Plugin {
 			callback: async () => {
 				await this.createNoteTaskForCurrentNote();
 			},
+		});
+	}
+
+	private registerRibbonCommands(): void {
+		this.addRibbonIcon('sync', 'Sync Todoist now', async () => {
+			const result = await this.runImportSync();
+			const prefix = result.ok ? 'Success:' : 'Failed:';
+			notify(this.settings, `${prefix} ${result.message}`, 8000);
 		});
 	}
 
