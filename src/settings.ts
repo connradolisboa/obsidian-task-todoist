@@ -63,6 +63,8 @@ export interface PropNames {
 	todoistDuration: string;
 	// NoteTask: Todoist task ID linked to any Obsidian note (one-way Obsidian→Todoist)
 	todoistNoteTaskId: string;
+	// NoteTask: timestamp of the last NoteTask sync cycle for this note (used for Obsidian-wins conflict resolution)
+	todoistNoteTaskSyncedAt: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -110,6 +112,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistProjectTaskId: 'todoist_project_task_id',
 	todoistDuration: 'todoist_duration',
 	todoistNoteTaskId: 'todoist_note_task_id',
+	todoistNoteTaskSyncedAt: 'todoist_note_task_synced_at',
 };
 
 export interface TaskTodoistSettings {
@@ -171,6 +174,12 @@ export interface TaskTodoistSettings {
 	noteTaskAutoCreateTags: string;
 	// NoteTask: folder paths excluded from NoteTask auto-create (comma-separated)
 	noteTaskExcludePaths: string;
+	// NoteTask: note statuses treated as "to-do" (keep Todoist task active / uncomplete if done)
+	noteTaskTodoStatuses: string;
+	// NoteTask: note statuses that complete the Todoist task
+	noteTaskDoneStatuses: string;
+	// NoteTask: note statuses that delete the Todoist task and stop re-creation
+	noteTaskStopStatuses: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -223,4 +232,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	disableNotifications: false,
 	noteTaskAutoCreateTags: '',
 	noteTaskExcludePaths: '',
+	noteTaskTodoStatuses: 'Open,Active,Ongoing,Backlog,Waiting',
+	noteTaskDoneStatuses: '',
+	noteTaskStopStatuses: '',
 };

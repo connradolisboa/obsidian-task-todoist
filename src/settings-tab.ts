@@ -4,13 +4,14 @@ import type TaskTodoistPlugin from './main';
 import { DEFAULT_PROP_NAMES } from './settings';
 import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
-type TabId = 'general' | 'import' | 'sync' | 'notes' | 'properties';
+type TabId = 'general' | 'import' | 'sync' | 'notes' | 'notetask' | 'properties';
 
 const TABS: { id: TabId; label: string }[] = [
 	{ id: 'general', label: 'General' },
 	{ id: 'import', label: 'Import' },
 	{ id: 'sync', label: 'Sync' },
 	{ id: 'notes', label: 'Notes' },
+	{ id: 'notetask', label: 'NoteTask' },
 	{ id: 'properties', label: 'Properties' },
 ];
 
@@ -47,6 +48,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			case 'import': this.renderImportTab(content); break;
 			case 'sync': this.renderSyncTab(content); break;
 			case 'notes': this.renderNotesTab(content); break;
+			case 'notetask': this.renderNoteTaskTab(content); break;
 			case 'properties': this.renderPropertiesTab(content); break;
 		}
 	}
@@ -775,8 +777,13 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		refTemplateSetting.settingEl.style.display =
 			this.plugin.settings.referenceProjectNames.trim() ? '' : 'none';
 
-		// ── NoteTask ──────────────────────────────────────────────────────────────
-		new Setting(el).setName('NoteTask').setHeading();
+	}
+
+	// ── NoteTask ───────────────────────────────────────────────────────────────
+	// Auto-create, two-way sync settings for NoteTasks.
+
+	private renderNoteTaskTab(el: HTMLElement): void {
+		new Setting(el).setName('Auto-create').setHeading();
 
 		new Setting(el)
 			.setName('Auto-create NoteTask for project notes')
@@ -814,6 +821,60 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.size = 36;
+			});
+
+		new Setting(el).setName('Status mapping').setHeading();
+
+		new Setting(el)
+			.setName('To-do statuses')
+			.setDesc(
+				'Comma-separated note status values (from task_status) that mean the note is still active. ' +
+				'If the Todoist task is completed but the note has one of these statuses, the task will be uncompleted in Todoist. ' +
+				'Any status not listed in Done or Stop statuses is also treated as to-do by default.'
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('Open,Active,Ongoing,Backlog,Waiting')
+					.setValue(this.plugin.settings.noteTaskTodoStatuses)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskTodoStatuses = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
+		new Setting(el)
+			.setName('Done statuses')
+			.setDesc(
+				'Comma-separated note status values that mean the task is complete. ' +
+				'When the note has one of these statuses, the Todoist task will be marked complete on the next sync.'
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('Done,Complete,Closed')
+					.setValue(this.plugin.settings.noteTaskDoneStatuses)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskDoneStatuses = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
+		new Setting(el)
+			.setName('Stop statuses')
+			.setDesc(
+				'Comma-separated note status values that delete the Todoist task and stop the plugin from recreating it. ' +
+				'The task_status must be changed to a to-do or done status before a new NoteTask will be created.'
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('Archived,Cancelled')
+					.setValue(this.plugin.settings.noteTaskStopStatuses)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskStopStatuses = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
 			});
 	}
 
@@ -879,6 +940,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist pending ID', 'Written immediately after a local task create is dispatched to Todoist. Prevents duplicate tasks if sync crashes mid-flight. Cleared once the create is confirmed.', 'todoistPendingId');
 		this.addPropNameSetting(el, 'Todoist project task ID', 'Todoist task ID for the NoteTask auto-created when a project note is first created.', 'todoistProjectTaskId');
 		this.addPropNameSetting(el, 'Todoist NoteTask ID', 'Todoist task ID for the NoteTask linked to this note (one-way Obsidian→Todoist). Preserved when the task is deleted to prevent auto-recreate.', 'todoistNoteTaskId');
+		this.addPropNameSetting(el, 'NoteTask last synced at', 'Timestamp written after each NoteTask sync cycle. Used to detect Obsidian-side changes for conflict resolution (Obsidian wins).', 'todoistNoteTaskSyncedAt');
 
 		new Setting(el).setName('Sync tracking').setHeading();
 

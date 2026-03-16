@@ -112,6 +112,9 @@ export interface ActiveNoteTaskEntry {
 	file: TFile;
 	noteTaskId: string;
 	noteTitle: string;
+	noteStatus: string;
+	modified: string | undefined;
+	noteTaskSyncedAt: string | undefined;
 	priority?: number;
 	dueDate?: string;
 	dueString?: string;
@@ -1532,12 +1535,12 @@ export class TaskNoteRepository {
 			const rawNoteTaskId = fm[p.todoistNoteTaskId];
 			if (typeof rawNoteTaskId !== 'string' || !rawNoteTaskId.trim()) continue;
 
-			// Skip notes where NoteTask was marked deleted (only applicable to non-task notes)
+			// Skip notes where NoteTask was marked deleted or stopped (only applicable to non-task notes)
 			const rawTodoistId = fm[p.todoistId];
 			const hasTodoistId = typeof rawTodoistId === 'string' && (rawTodoistId as string).trim();
 			if (!hasTodoistId) {
 				const syncStatus = typeof fm[p.todoistSyncStatus] === 'string' ? (fm[p.todoistSyncStatus] as string) : '';
-				if (syncStatus === 'deleted_remote') continue;
+				if (syncStatus === 'deleted_remote' || syncStatus === 'stopped') continue;
 			}
 
 			// Extract sync properties from frontmatter
@@ -1553,16 +1556,24 @@ export class TaskNoteRepository {
 			const deadline = typeof fm[p.todoistDeadline] === 'string' ? (fm[p.todoistDeadline] as string).trim() || undefined : undefined;
 			const description = typeof fm[p.todoistDescription] === 'string' ? (fm[p.todoistDescription] as string) : undefined;
 
-			// Merge explicit labels with note tags
+			// Merge explicit labels with note tags (labels are Obsidian→Todoist only)
 			const explicitLabels = typeof fm[p.todoistLabels] === 'string' ? (fm[p.todoistLabels] as string).split(',').map(l => l.trim()).filter(l => l) : [];
 			const noteTags = Array.isArray(fm[p.tags]) ? (fm[p.tags] as string[]).map(t => t.trim()).filter(t => t) : [];
 			const allLabels = Array.from(new Set([...explicitLabels, ...noteTags])); // Deduplicate
 			const labels = allLabels.length > 0 ? allLabels : undefined;
 
+			// Note status and sync timestamps for two-way conflict resolution
+			const noteStatus = typeof fm[p.taskStatus] === 'string' ? (fm[p.taskStatus] as string).trim() : '';
+			const modified = typeof fm[p.modified] === 'string' ? (fm[p.modified] as string).trim() || undefined : undefined;
+			const noteTaskSyncedAt = typeof fm[p.todoistNoteTaskSyncedAt] === 'string' ? (fm[p.todoistNoteTaskSyncedAt] as string).trim() || undefined : undefined;
+
 			active.push({
 				file,
 				noteTaskId: rawNoteTaskId.trim(),
 				noteTitle: file.basename,
+				noteStatus,
+				modified,
+				noteTaskSyncedAt,
 				priority,
 				dueDate,
 				dueString,
@@ -1596,6 +1607,70 @@ export class TaskNoteRepository {
 
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'deleted_remote';
+		});
+	}
+
+	/**
+	 * Marks a NoteTask as stopped (note-initiated, e.g. stop-status in Obsidian).
+	 * Sets todoist_sync_status to 'stopped' to prevent future sync attempts.
+	 * The todoist_note_task_id is preserved (non-empty) to prevent auto-recreate.
+	 */
+	async markNoteTaskStopped(file: TFile): Promise<void> {
+		const p = getPropNames(this.settings);
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm) return;
+
+		const rawTodoistId = fm[p.todoistId];
+		const hasTodoistId = typeof rawTodoistId === 'string' && (rawTodoistId as string).trim();
+		if (hasTodoistId) {
+			// Dual-purpose task note — skip status update to avoid conflicting with task sync.
+			return;
+		}
+
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'stopped';
+		});
+	}
+
+	/**
+	 * Updates todoist_note_task_synced_at without touching the modified timestamp.
+	 * Called after a push so the next sync knows when we last synced.
+	 */
+	async markNoteTaskSyncedAt(file: TFile): Promise<void> {
+		const p = getPropNames(this.settings);
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskSyncedAt] = formatModifiedDate(new Date());
+		});
+	}
+
+	/**
+	 * Pulls remote Todoist values (due, priority, deadline, description) into the note frontmatter.
+	 * Also updates modified and todoistNoteTaskSyncedAt to the current time.
+	 */
+	async applyNoteTaskPull(
+		file: TFile,
+		remoteDue: string | null,
+		remoteDueString: string | null,
+		remotePriority: number | undefined,
+		remoteDeadline: string | null,
+		remoteDescription: string | undefined,
+	): Promise<void> {
+		const p = getPropNames(this.settings);
+		const now = formatModifiedDate(new Date());
+		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			const fm = frontmatter as Record<string, unknown>;
+			fm[p.todoistDue] = remoteDue ?? '';
+			fm[p.todoistDueString] = remoteDueString ?? '';
+			if (remotePriority !== undefined) {
+				fm[p.todoistPriority] = remotePriority;
+				fm[p.todoistPriorityLabel] = priorityLabel(remotePriority);
+			}
+			fm[p.todoistDeadline] = remoteDeadline ?? '';
+			fm[p.todoistDescription] = remoteDescription ?? '';
+			// Touch modified so the user can see the note was updated
+			fm[p.modified] = now;
+			// Record sync time so next sync sees no Obsidian-side change
+			fm[p.todoistNoteTaskSyncedAt] = now;
 		});
 	}
 

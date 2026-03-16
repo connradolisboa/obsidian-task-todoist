@@ -268,47 +268,142 @@ export class SyncService {
 			}
 		}
 
-		// Phase 9b: sync NoteTask titles and properties (non-critical, per-item)
+		// Phase 9b: two-way NoteTask sync (non-critical, per-item)
+	// Direction rules:
+	//   - Obsidian always wins on conflict (modified > noteTaskSyncedAt → push only)
+	//   - If note unchanged since last sync → pull due/priority/deadline/description from Todoist
+	//   - Completion and deletion are driven by note status settings
 	let noteTasksUpdated = 0;
+	let noteTasksPulled = 0;
+	const todoStatusSet = new Set(
+		(this.settings.noteTaskTodoStatuses ?? 'Open,Active,Ongoing,Backlog,Waiting')
+			.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+	);
+	const doneStatusSet = new Set(
+		(this.settings.noteTaskDoneStatuses ?? '')
+			.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+	);
+	const stopStatusSet = new Set(
+		(this.settings.noteTaskStopStatuses ?? '')
+			.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+	);
 	try {
 		const activeNoteTasks = await repository.listActiveNoteTasks();
 		for (const entry of activeNoteTasks) {
 			try {
 				const remoteItem = activeItemById.get(entry.noteTaskId);
+				const noteStatusLower = entry.noteStatus.toLowerCase();
+				const isStopStatus = stopStatusSet.has(noteStatusLower);
+				const isDoneStatus = doneStatusSet.has(noteStatusLower);
+				// Anything not explicitly in done or stop is treated as to-do (preserves backwards compat)
+				const isTodoStatus = !isDoneStatus && !isStopStatus;
+
+				// Build the Obsidian URI for the push content
+				const vaultName = encodeURIComponent(this.app.vault.getName());
+				const filePath = encodeURIComponent(entry.file.path);
+				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+
 				if (!remoteItem || remoteItem.is_deleted) {
-					// NoteTask was deleted (or completed) in Todoist — mark it
-					await repository.markNoteTaskDeleted(entry.file);
-				} else {
-					// Push updated title with link, preserving any leading '* ' the user added in Todoist
+					// Task absent from active items — check if deleted vs completed
+					const wasDeleted = recentlyDeletedIds.has(entry.noteTaskId);
+					if (wasDeleted) {
+						// Actually deleted in Todoist → mark note accordingly
+						await repository.markNoteTaskDeleted(entry.file);
+					} else if (isStopStatus) {
+						// Note says stop and task is already gone — just mark stopped
+						await repository.markNoteTaskStopped(entry.file);
+					} else if (isTodoStatus) {
+						// Task was completed in Todoist but note is still open → uncomplete it
+						const currentRemoteTitle = remoteItem?.content ?? '';
+						const prefix = currentRemoteTitle.startsWith('* ') ? '* ' : '';
+						const newContent = `${prefix}${entry.noteTitle} [+](${obsidianUri})`;
+						try {
+							await todoistClient.updateTask({
+								id: entry.noteTaskId,
+								content: newContent,
+								description: entry.description,
+								isDone: false,
+								priority: entry.priority,
+								labels: entry.labels,
+								dueDate: entry.dueDate?.trim(),
+								dueString: entry.dueString?.trim(),
+								clearDue: !entry.dueDate && !entry.dueString,
+								deadline: entry.deadline?.trim(),
+								clearDeadline: !entry.deadline,
+							});
+							await repository.markNoteTaskSyncedAt(entry.file);
+							noteTasksUpdated += 1;
+						} catch {
+							// If uncomplete fails (task may truly be gone), mark deleted
+							await repository.markNoteTaskDeleted(entry.file);
+						}
+					} else {
+						// isDone: task completed in Todoist and note also in done/stop — sync is settled
+						await repository.markNoteTaskSyncedAt(entry.file);
+					}
+					continue;
+				}
+
+				// Task is active in Todoist
+				if (isStopStatus) {
+					// Note says stop → delete the Todoist task and stop syncing
+					await todoistClient.deleteTask(entry.noteTaskId);
+					await repository.markNoteTaskStopped(entry.file);
+					continue;
+				}
+
+				// Determine push vs pull using the modified timestamp
+				const obsidianChanged = !entry.noteTaskSyncedAt || (entry.modified ?? '') > entry.noteTaskSyncedAt;
+
+				if (obsidianChanged) {
+					// Obsidian has changes → push all Obsidian values to Todoist
 					const currentRemoteTitle = remoteItem.content ?? '';
 					const prefix = currentRemoteTitle.startsWith('* ') ? '* ' : '';
-					const vaultName = encodeURIComponent(this.app.vault.getName());
-					const filePath = encodeURIComponent(entry.file.path);
-					const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 					const newContent = `${prefix}${entry.noteTitle} [+](${obsidianUri})`;
-
-					// Build update object with all properties
-					const updatePayload: any = {
+					await todoistClient.updateTask({
 						id: entry.noteTaskId,
 						content: newContent,
-						isDone: false,
-					};
+						description: entry.description,
+						isDone: isDoneStatus,
+						priority: entry.priority,
+						labels: entry.labels,
+						dueDate: entry.dueDate?.trim(),
+						dueString: entry.dueString?.trim(),
+						clearDue: !entry.dueDate && !entry.dueString,
+						deadline: entry.deadline?.trim(),
+						clearDeadline: !entry.deadline,
+					});
+					await repository.markNoteTaskSyncedAt(entry.file);
+					noteTasksUpdated += 1;
+				} else {
+					// Note unchanged since last sync → pull Todoist values into the note
+					const remoteDue = remoteItem.due?.date ?? null;
+					const remoteDueString = remoteItem.due?.string ?? null;
+					const remoteDeadline = remoteItem.deadline?.date ?? null;
+					const remoteDescription = remoteItem.description;
+					const remotePriority = remoteItem.priority;
 
-					// Add optional properties if present
-					if (entry.description) updatePayload.description = entry.description;
-					if (entry.priority !== undefined) updatePayload.priority = entry.priority;
-					if (entry.dueDate) updatePayload.dueDate = entry.dueDate.trim();
-					if (entry.dueString) updatePayload.dueString = entry.dueString.trim();
-					if (entry.deadline) updatePayload.deadline = entry.deadline.trim();
-					if (entry.labels) updatePayload.labels = entry.labels;
+					// Check if anything actually changed on the remote side
+					const remoteChanged =
+						(remoteDue ?? '') !== (entry.dueDate ?? '') ||
+						(remoteDueString ?? '') !== (entry.dueString ?? '') ||
+						(remoteDeadline ?? '') !== (entry.deadline ?? '') ||
+						(remoteDescription ?? '') !== (entry.description ?? '') ||
+						remotePriority !== entry.priority;
 
-					// Clear properties if they were removed from the note
-					if (!entry.dueDate && !entry.dueString) updatePayload.clearDue = true;
-					if (!entry.deadline) updatePayload.clearDeadline = true;
-
-					if (newContent !== currentRemoteTitle || entry.description || entry.priority !== undefined || entry.dueDate || entry.dueString || entry.deadline || entry.labels) {
-						await todoistClient.updateTask(updatePayload);
-						noteTasksUpdated += 1;
+					if (remoteChanged) {
+						await repository.applyNoteTaskPull(
+							entry.file,
+							remoteDue,
+							remoteDueString,
+							remotePriority,
+							remoteDeadline,
+							remoteDescription,
+						);
+						noteTasksPulled += 1;
+					} else {
+						// Nothing changed on either side; still update the sync timestamp
+						await repository.markNoteTaskSyncedAt(entry.file);
 					}
 				}
 			} catch (e) {
@@ -368,7 +463,7 @@ export class SyncService {
 
 		const ancestorCount = importableWithAncestors.length - importableItems.length;
 		const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
-		const noteTaskMsg = (noteTasksAutoCreated > 0 || noteTasksUpdated > 0) ? `, ${noteTasksAutoCreated} NoteTask(s) created, ${noteTasksUpdated} NoteTask title(s) updated` : '';
+		const noteTaskMsg = (noteTasksAutoCreated > 0 || noteTasksUpdated > 0 || noteTasksPulled > 0) ? `, ${noteTasksAutoCreated} NoteTask(s) created, ${noteTasksUpdated} pushed, ${noteTasksPulled} pulled` : '';
 		const errorSuffix = phaseErrors.length > 0 ? ` [${phaseErrors.length} phase error(s): ${phaseErrors.join('; ')}]` : '';
 		const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}${noteTaskMsg}.${errorSuffix}`;
 		return {

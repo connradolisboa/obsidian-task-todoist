@@ -274,6 +274,25 @@ export class TodoistClient {
 		return mappedId;
 	}
 
+	async deleteTask(id: string): Promise<void> {
+		const commandId = generateUuid();
+		const response = await this.syncWithCommands([
+			{
+				type: 'item_delete',
+				uuid: commandId,
+				args: { id },
+			},
+		]);
+		if (response.status === 401) {
+			throw new Error('Todoist authentication failed. Check your token.');
+		}
+		if (response.status !== 200) {
+			throw new Error(`Todoist delete task failed with status ${response.status}.`);
+		}
+		const payload = response.json as TodoistSyncResponse;
+		assertSyncStatusOk(payload, commandId, 'delete');
+	}
+
 	async updateTask(input: TodoistTaskUpdateInput): Promise<void> {
 		const commands = [];
 		const updateCommandId = generateUuid();
