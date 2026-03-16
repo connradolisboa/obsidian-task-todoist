@@ -29,6 +29,7 @@ export interface TodoistItem {
 		amount: number;
 		unit: string;
 	} | null;
+	order?: number;
 }
 
 export interface TodoistProject {
@@ -71,6 +72,7 @@ export interface TodoistCreateTaskInput {
 	dueString?: string;
 	deadline?: string; // YYYY-MM-DD
 	duration?: number; // minutes
+	order?: number;
 }
 
 export interface TodoistTaskUpdateInput {
@@ -243,6 +245,9 @@ export class TodoistClient {
 		}
 		if (typeof input.duration === 'number' && input.duration > 0) {
 			args.duration = { amount: input.duration, unit: 'minute' };
+		}
+		if (typeof input.order === 'number') {
+			args.order = input.order;
 		}
 
 		const response = await this.syncWithCommands([
@@ -427,6 +432,7 @@ function normalizeItems(rawItems: Array<Record<string, unknown>>): TodoistItem[]
 			responsible_uid: toOptionalId(raw.responsible_uid),
 			deadline: toDeadline(raw.deadline),
 			duration: toDuration(raw.duration),
+			order: toOptionalNumber(raw.order),
 		});
 	}
 	return items;

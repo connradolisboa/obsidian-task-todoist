@@ -423,9 +423,18 @@ export class SyncService {
 				const vaultName = encodeURIComponent(this.app.vault.getName());
 				const filePath = encodeURIComponent(pending.file.path);
 				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+
+				// Calculate order to place NoteTask at the top of the project
+				const projectTasks = snapshot.items.filter((item) => item.project_id === pending.projectId && !item.parent_id);
+				const minOrder = projectTasks.length > 0
+					? Math.min(...projectTasks.map((t) => t.order ?? 0))
+					: 0;
+				const noteTaskOrder = minOrder > 0 ? minOrder - 1 : minOrder;
+
 				const createdTaskId = await todoistClient.createTask({
 					content: `${pending.title} [+](${obsidianUri})`,
 					projectId: pending.projectId,
+					order: noteTaskOrder,
 				});
 				await repository.markNoteTaskCreated(pending.file, createdTaskId);
 				noteTasksAutoCreated += 1;

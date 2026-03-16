@@ -261,9 +261,22 @@ export default class TaskTodoistPlugin extends Plugin {
 			const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 
 			const client = new TodoistClient(token);
+
+			// Fetch snapshot to calculate order for positioning at top
+			const snapshot = await client.fetchSyncSnapshot();
+			let noteTaskOrder: number | undefined;
+			if (projectId) {
+				const projectTasks = snapshot.items.filter((item) => item.project_id === projectId && !item.parent_id);
+				if (projectTasks.length > 0) {
+					const minOrder = Math.min(...projectTasks.map((t) => t.order ?? 0));
+					noteTaskOrder = minOrder > 0 ? minOrder - 1 : minOrder;
+				}
+			}
+
 			const taskId = await client.createTask({
 				content: `${file.basename} [note](${obsidianUri})`,
 				projectId,
+				order: noteTaskOrder,
 			});
 
 			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
