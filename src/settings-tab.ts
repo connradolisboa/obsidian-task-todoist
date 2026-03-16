@@ -837,6 +837,20 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				text.inputEl.size = 40;
 			});
 
+		new Setting(el).setName('Labels').setHeading();
+
+		new Setting(el)
+			.setName('Sync note tags as Todoist labels')
+			.setDesc('When enabled, Obsidian tags on the note (from the tags property) are pushed to Todoist as labels alongside any explicit todoist_labels values. Example: a note tagged "area" will get an "area" label in Todoist.')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.noteTaskSyncTagsAsLabels)
+					.onChange(async (value) => {
+						this.plugin.settings.noteTaskSyncTagsAsLabels = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
 		new Setting(el).setName('Status mapping').setHeading();
 
 		new Setting(el)

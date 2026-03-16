@@ -115,7 +115,7 @@ export class TodoistClient {
 
 	constructor(token: string) {
 		this.token = token;
-		this.rateLimiter = new RateLimiter(4);
+		this.rateLimiter = new RateLimiter(2);
 	}
 
 	async testConnection(): Promise<{ ok: boolean; message: string }> {
@@ -360,7 +360,7 @@ export class TodoistClient {
 	private async syncWithCommands(commands: unknown[]) {
 		return this.syncWithBody({
 			sync_token: '*',
-			resource_types: '["items"]',
+			resource_types: '[]',
 			commands: JSON.stringify(commands),
 		});
 	}

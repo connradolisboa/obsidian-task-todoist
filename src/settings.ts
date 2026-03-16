@@ -184,6 +184,8 @@ export interface TaskTodoistSettings {
 	noteTaskTagProjectMap: string;
 	// NoteTask: status→section mapping for create and sync (comma-separated "Status:SectionName" pairs)
 	noteTaskStatusSectionMap: string;
+	// NoteTask: sync note tags (from the tags/aliases property) as Todoist labels on push
+	noteTaskSyncTagsAsLabels: boolean;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -241,4 +243,5 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	noteTaskStopStatuses: '',
 	noteTaskTagProjectMap: '',
 	noteTaskStatusSectionMap: '',
+	noteTaskSyncTagsAsLabels: false,
 };

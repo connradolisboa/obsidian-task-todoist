@@ -449,6 +449,7 @@ export class SyncService {
 					projectId: resolvedNoteTaskProjectId,
 					sectionId: resolvedNoteTaskSectionId,
 					order: noteTaskOrder,
+					labels: pending.labels,
 				});
 				await repository.markNoteTaskCreated(pending.file, createdTaskId);
 				noteTasksAutoCreated += 1;

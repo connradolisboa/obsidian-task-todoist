@@ -110,6 +110,7 @@ export interface PendingNoteTaskAutoCreate {
 	projectName?: string;
 	/** Section name resolved from noteTaskStatusSectionMap. */
 	sectionName?: string;
+	labels?: string[];
 }
 
 export interface ActiveNoteTaskEntry {
@@ -1529,23 +1530,33 @@ export class TaskNoteRepository {
 			const hasMatchingTag = noteTags.some((t) => autoTagSet.has(t));
 			if (!hasMatchingTag) continue;
 
-			// Resolve project ID from todoist_project_link if present
-			const projectId = this.resolveNoteTaskProjectId(file, fm, p);
-
-			// Fallback: resolve project name from tag→project map
+			// Tag→project map takes priority over the note's own project link.
+			// (Project/area notes have todoist_project_id but the NoteTask should go
+			// to the tag-mapped project or inbox, not back into the same project.)
 			let projectName: string | undefined;
-			if (!projectId && tagProjectMap.size > 0) {
+			if (tagProjectMap.size > 0) {
 				for (const tag of noteTags) {
 					const mapped = tagProjectMap.get(tag);
 					if (mapped) { projectName = mapped; break; }
 				}
 			}
 
+			// Fall back to note's own project resolution (todoist_project_link, then todoist_project_id)
+			const projectId = !projectName ? this.resolveNoteTaskProjectId(file, fm, p) : undefined;
+
 			// Resolve section name from status→section map
 			const noteStatus = typeof fm[p.taskStatus] === 'string' ? (fm[p.taskStatus] as string).trim().toLowerCase() : '';
 			const sectionName = statusSectionMap.size > 0 ? statusSectionMap.get(noteStatus) : undefined;
 
-			pending.push({ file, title: file.basename, projectId, projectName, sectionName });
+			// Build labels from explicit todoist_labels + note tags (if enabled)
+			const explicitLabels = typeof fm[p.todoistLabels] === 'string'
+				? (fm[p.todoistLabels] as string).split(',').map(l => l.trim()).filter(l => l)
+				: [];
+			const tagLabels: string[] = this.settings.noteTaskSyncTagsAsLabels ? noteTags : [];
+			const allLabels = Array.from(new Set([...explicitLabels, ...tagLabels]));
+			const labels = allLabels.length > 0 ? allLabels : undefined;
+
+			pending.push({ file, title: file.basename, projectId, projectName, sectionName, labels });
 		}
 
 		return pending;
@@ -1610,7 +1621,14 @@ export class TaskNoteRepository {
 
 			// Merge explicit labels with note tags (labels are Obsidian→Todoist only)
 			const explicitLabels = typeof fm[p.todoistLabels] === 'string' ? (fm[p.todoistLabels] as string).split(',').map(l => l.trim()).filter(l => l) : [];
-			const noteTags = Array.isArray(fm[p.tags]) ? (fm[p.tags] as string[]).map(t => t.trim()).filter(t => t) : [];
+			const rawTags = fm[p.tags];
+			const noteTags: string[] = this.settings.noteTaskSyncTagsAsLabels
+				? (Array.isArray(rawTags)
+					? (rawTags as unknown[]).map((t) => String(t).replace(/^#/, '').toLowerCase())
+					: typeof rawTags === 'string'
+					? rawTags.split(/[\s,]+/).map((t) => t.replace(/^#/, '').toLowerCase()).filter(Boolean)
+					: [])
+				: [];
 			const allLabels = Array.from(new Set([...explicitLabels, ...noteTags])); // Deduplicate
 			const labels = allLabels.length > 0 ? allLabels : undefined;
 
