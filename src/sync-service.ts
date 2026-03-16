@@ -307,6 +307,7 @@ export class SyncService {
 				const noteTaskSectionId = entry.sectionName
 					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot)
 					: undefined;
+				console.log(`[NoteTask] "${entry.noteTitle}" status="${entry.noteStatus}" sectionName="${entry.sectionName ?? '(none)'}" sectionId="${noteTaskSectionId ?? '(none)'}" projectId="${remoteItem?.project_id ?? '(none)'}" modified="${entry.modified ?? ''}" syncedAt="${entry.noteTaskSyncedAt ?? ''}"`);
 
 				if (!remoteItem || remoteItem.is_deleted) {
 					// Task absent from active items — check if deleted vs completed
@@ -366,11 +367,17 @@ export class SyncService {
 					const currentRemoteTitle = remoteItem.content ?? '';
 					const prefix = currentRemoteTitle.startsWith('* ') ? '* ' : '';
 					const newContent = `${prefix}${entry.noteTitle} [+](${obsidianUri})`;
+					// Only send isDone when the completion state actually changes.
+					// Sending item_uncomplete on an already-open task causes Todoist
+					// to restore the item to its original section, undoing the item_move.
+					const remoteChecked = Boolean(remoteItem.checked);
+					const needsStatusChange = isDoneStatus !== remoteChecked;
+					console.log(`[NoteTask] PUSH "${entry.noteTitle}" → sectionId="${noteTaskSectionId ?? '(none)'}" isDone=${needsStatusChange ? isDoneStatus : '(skip)'} remoteSection="${remoteItem.section_id ?? '(none)'}"`);
 					await todoistClient.updateTask({
 						id: entry.noteTaskId,
 						content: newContent,
 						description: entry.description,
-						isDone: isDoneStatus,
+						isDone: needsStatusChange ? isDoneStatus : undefined,
 						priority: entry.priority,
 						labels: entry.labels,
 						dueDate: entry.dueDate?.trim(),
@@ -578,8 +585,12 @@ function resolveSectionId(
 	if (!sectionName?.trim() || !projectId) {
 		return undefined;
 	}
-	const section = snapshot.sections.find(
-		(item) => item.project_id === projectId && item.name.toLowerCase() === sectionName.trim().toLowerCase(),
+	const projectSections = snapshot.sections.filter((item) => item.project_id === projectId);
+	const section = projectSections.find(
+		(item) => item.name.toLowerCase() === sectionName.trim().toLowerCase(),
 	);
+	if (!section) {
+		console.log(`[resolveSectionId] Section "${sectionName}" not found in project "${projectId}". Available sections: ${projectSections.map((s) => `"${s.name}"`).join(', ') || '(none)'}`);
+	}
 	return section?.id;
 }

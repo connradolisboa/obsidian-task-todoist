@@ -79,7 +79,7 @@ export interface TodoistTaskUpdateInput {
 	id: string;
 	content?: string;
 	description?: string;
-	isDone: boolean;
+	isDone?: boolean; // undefined = don't change completion state; true = close; false = uncomplete
 	isRecurring?: boolean;
 	projectId?: string;
 	sectionId?: string;
@@ -311,7 +311,7 @@ export class TodoistClient {
 				...(input.content !== undefined ? { content: input.content } : {}),
 				description: input.description ?? '',
 				...(input.projectId ? { project_id: input.projectId } : {}),
-				...(input.sectionId ? { section_id: input.sectionId } : {}),
+				// Note: section moves use item_move below — item_update does not support section_id
 				...(typeof input.priority === 'number' ? { priority: input.priority } : {}),
 				...(input.labels !== undefined ? { labels: input.labels } : {}),
 				...(isRecurringCompletion ? {} : (due ? { due } : {})),
@@ -324,14 +324,32 @@ export class TodoistClient {
 			},
 		});
 
+		// item_update does not support section moves; use item_move when a target section is specified
+		const moveCommandId = generateUuid();
+		if (input.sectionId) {
+			commands.push({
+				type: 'item_move',
+				uuid: moveCommandId,
+				args: {
+					id: input.id,
+					section_id: input.sectionId,
+				},
+			});
+		}
+
+		// Only send item_close / item_uncomplete when the caller explicitly requests a
+		// completion-state change.  Sending item_uncomplete on an already-open task can
+		// cause Todoist to restore the item to its original section, undoing the item_move above.
 		const statusCommandId = generateUuid();
-		commands.push({
-			type: input.isDone ? 'item_close' : 'item_uncomplete',
-			uuid: statusCommandId,
-			args: {
-				id: input.id,
-			},
-		});
+		if (input.isDone !== undefined) {
+			commands.push({
+				type: input.isDone ? 'item_close' : 'item_uncomplete',
+				uuid: statusCommandId,
+				args: {
+					id: input.id,
+				},
+			});
+		}
 
 		const response = await this.syncWithCommands(commands);
 		if (response.status === 401) {
@@ -343,11 +361,16 @@ export class TodoistClient {
 
 		const payload = response.json as TodoistSyncResponse;
 		assertSyncStatusOk(payload, updateCommandId, 'update');
-		assertSyncStatusOk(
-			payload,
-			statusCommandId,
-			input.isDone ? 'close' : 'uncomplete',
-		);
+		if (input.sectionId) {
+			assertSyncStatusOk(payload, moveCommandId, 'move');
+		}
+		if (input.isDone !== undefined) {
+			assertSyncStatusOk(
+				payload,
+				statusCommandId,
+				input.isDone ? 'close' : 'uncomplete',
+			);
+		}
 	}
 
 	private async sync(resourceTypes: string[]) {

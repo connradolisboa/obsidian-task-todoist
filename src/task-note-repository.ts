@@ -1,4 +1,4 @@
-import { App, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, TFile, TFolder, normalizePath, parseYaml } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
 import { notify } from './notify';
 import type { TodoistItem, TodoistProject, TodoistSection } from './todoist-client';
@@ -6,6 +6,7 @@ import {
 	applyStandardTaskFrontmatter,
 	formatCreatedDate,
 	formatModifiedDate,
+	formatSyncTimestamp,
 	generateUuid,
 	getDefaultTaskTag,
 	getTaskStatus,
@@ -1591,8 +1592,21 @@ export class TaskNoteRepository {
 			}
 		}
 
+		// First pass: use metadataCache to quickly identify NoteTask files
+		const noteTaskFiles: TFile[] = [];
 		for (const file of this.app.vault.getMarkdownFiles()) {
-			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			const cachedFm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!cachedFm) continue;
+			const rawId = cachedFm[p.todoistNoteTaskId];
+			if (typeof rawId === 'string' && rawId.trim()) {
+				noteTaskFiles.push(file);
+			}
+		}
+
+		// Second pass: read fresh frontmatter from disk (metadataCache can be stale
+		// when the user just edited a property like status and immediately triggers sync)
+		for (const file of noteTaskFiles) {
+			const fm = await readFreshFrontmatter(this.app, file);
 			if (!fm) continue;
 
 			const rawNoteTaskId = fm[p.todoistNoteTaskId];
@@ -1634,7 +1648,11 @@ export class TaskNoteRepository {
 
 			// Note status and sync timestamps for two-way conflict resolution
 			const noteStatus = typeof fm[p.taskStatus] === 'string' ? (fm[p.taskStatus] as string).trim() : '';
-			const modified = typeof fm[p.modified] === 'string' ? (fm[p.modified] as string).trim() || undefined : undefined;
+			const fmModified = typeof fm[p.modified] === 'string' ? (fm[p.modified] as string).trim() || undefined : undefined;
+			// Use second-precision file mtime so edits within the same minute as the
+			// last sync are correctly detected as changes.
+			const fileMtimeStr = formatSyncTimestamp(new Date(file.stat.mtime));
+			const modified = (fmModified && fmModified > fileMtimeStr) ? fmModified : fileMtimeStr;
 			const noteTaskSyncedAt = typeof fm[p.todoistNoteTaskSyncedAt] === 'string' ? (fm[p.todoistNoteTaskSyncedAt] as string).trim() || undefined : undefined;
 
 			// Resolve section name from status→section map
@@ -1713,7 +1731,7 @@ export class TaskNoteRepository {
 	async markNoteTaskSyncedAt(file: TFile): Promise<void> {
 		const p = getPropNames(this.settings);
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskSyncedAt] = formatModifiedDate(new Date());
+			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskSyncedAt] = formatSyncTimestamp(new Date());
 		});
 	}
 
@@ -1731,6 +1749,7 @@ export class TaskNoteRepository {
 	): Promise<void> {
 		const p = getPropNames(this.settings);
 		const now = formatModifiedDate(new Date());
+		const syncNow = formatSyncTimestamp(new Date());
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			const fm = frontmatter as Record<string, unknown>;
 			fm[p.todoistDue] = remoteDue ?? '';
@@ -1743,8 +1762,8 @@ export class TaskNoteRepository {
 			fm[p.todoistDescription] = remoteDescription ?? '';
 			// Touch modified so the user can see the note was updated
 			fm[p.modified] = now;
-			// Record sync time so next sync sees no Obsidian-side change
-			fm[p.todoistNoteTaskSyncedAt] = now;
+			// Record sync time (second-precision) so next sync sees no Obsidian-side change
+			fm[p.todoistNoteTaskSyncedAt] = syncNow;
 		});
 	}
 
@@ -2846,6 +2865,22 @@ function stringArraysEqual(left: string[], right: string[]): boolean {
 /** Strip the obsidian note link we append to project task titles so it never leaks into note filenames or titles. */
 function stripObsidianNoteLink(content: string): string {
 	return content.replace(/\s*\[note\]\(obsidian:\/\/[^)]+\)\s*$/, '').trim();
+}
+
+/**
+ * Reads a file from disk and parses its YAML frontmatter, bypassing the
+ * metadataCache which can be stale when the user just edited a property.
+ */
+async function readFreshFrontmatter(app: App, file: TFile): Promise<Record<string, unknown> | undefined> {
+	try {
+		const content = await app.vault.read(file);
+		const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+		if (!match) return undefined;
+		const parsed = parseYaml(match[1] as string);
+		return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps): string {

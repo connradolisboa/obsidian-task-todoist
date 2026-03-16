@@ -155,6 +155,17 @@ export function formatModifiedDate(date: Date): string {
 	return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
+/** Second-precision ISO-ish timestamp for sync bookmarks (not stored in user-facing properties). */
+export function formatSyncTimestamp(date: Date): string {
+	const year = date.getFullYear();
+	const month = pad2(date.getMonth() + 1);
+	const day = pad2(date.getDate());
+	const hours = pad2(date.getHours());
+	const minutes = pad2(date.getMinutes());
+	const seconds = pad2(date.getSeconds());
+	return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
 function normalizeTags(value: unknown): string[] {
 	if (Array.isArray(value)) {
 		return value
