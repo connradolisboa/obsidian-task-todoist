@@ -1,5 +1,6 @@
 import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry, type ActiveNoteTaskEntry } from './task-note-repository';
 import type { TaskTodoistSettings } from './settings';
+import { getPropNames } from './task-frontmatter';
 import { filterImportableItems } from './import-rules';
 import { TodoistClient } from './todoist-client';
 import type { TodoistItem, TodoistSyncSnapshot } from './todoist-client';
@@ -10,6 +11,7 @@ import { type VaultIndex, buildVaultIndexSnapshot } from './vault-index';
 	export interface SyncRunResult {
 	ok: boolean;
 	message: string;
+	shortMessage?: string;
 	created?: number;
 	updated?: number;
 	imported?: number;
@@ -76,12 +78,18 @@ export class SyncService {
 		for (const pending of pendingLocalCreates) {
 			try {
 				const resolvedProjectId = resolveProjectId(pending.projectId, pending.projectName, projectIdByName);
+				if (!resolvedProjectId && pending.projectName?.trim()) {
+					phaseErrors.push(`Warning: Create "${pending.title}" — project "${pending.projectName}" not found in Todoist`);
+				}
+				const sectionWarnings: string[] = [];
 				const resolvedSectionId = resolveSectionId(
 					pending.sectionId,
 					pending.sectionName,
 					resolvedProjectId,
 					snapshot,
+					sectionWarnings,
 				);
+				phaseErrors.push(...sectionWarnings.map((w) => `Create "${pending.title}": ${w}`));
 				const dueDate = pending.dueDate?.trim() || undefined;
 				const dueString = pending.dueString?.trim() || undefined;
 				const createDeadline = pending.deadline?.trim() || undefined;
@@ -128,12 +136,18 @@ export class SyncService {
 		for (const pending of pendingLocalUpdates) {
 			try {
 				const resolvedProjectId = resolveProjectId(pending.projectId, pending.projectName, projectIdByName);
+				if (!resolvedProjectId && pending.projectName?.trim()) {
+					phaseErrors.push(`Warning: Update "${pending.title}" — project "${pending.projectName}" not found in Todoist`);
+				}
+				const sectionWarnings: string[] = [];
 				const resolvedSectionId = resolveSectionId(
 					pending.sectionId,
 					pending.sectionName,
 					resolvedProjectId,
 					snapshot,
+					sectionWarnings,
 				);
+				phaseErrors.push(...sectionWarnings.map((w) => `Update "${pending.title}": ${w}`));
 				const dueDate = pending.dueDate?.trim() || undefined;
 				const dueString = pending.dueString?.trim() || undefined;
 				const deadline = pending.deadline?.trim() || undefined;
@@ -233,6 +247,28 @@ export class SyncService {
 			phaseErrors.push(`Missing tasks: ${errorMessage(e)}`);
 		}
 
+		// Phase 8b: detect task notes whose Todoist project no longer exists (non-critical)
+		const activeProjectIds = new Set(snapshot.projects.map((proj) => proj.id));
+		const orphanedTaskNames: string[] = [];
+		try {
+			const p = getPropNames(this.settings);
+			for (const entry of existingSyncedTasks) {
+				const fm = this.app.metadataCache.getFileCache(entry.file)?.frontmatter as Record<string, unknown> | undefined;
+				if (!fm) continue;
+				const projId = typeof fm[p.todoistProjectId] === 'string' ? (fm[p.todoistProjectId] as string).trim() : '';
+				if (projId && !activeProjectIds.has(projId)) {
+					orphanedTaskNames.push(entry.file.basename);
+				}
+			}
+			if (orphanedTaskNames.length > 0) {
+				const names = orphanedTaskNames.slice(0, 5).join(', ');
+				const extra = orphanedTaskNames.length > 5 ? ` …and ${orphanedTaskNames.length - 5} more` : '';
+				phaseErrors.push(`Warning: ${orphanedTaskNames.length} task note(s) reference a Todoist project that no longer exists (${names}${extra})`);
+			}
+		} catch (e) {
+			phaseErrors.push(`Orphan check: ${errorMessage(e)}`);
+		}
+
 		// Phase 9: create Todoist tasks for pending project notes (non-critical, per-item)
 		let projectTasksCreated = 0;
 		if (this.settings.createProjectTasks) {
@@ -304,10 +340,11 @@ export class SyncService {
 				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 
 				// Resolve section ID for push based on note status (uses remoteItem.project_id when available)
+				const noteTaskSectionWarnings: string[] = [];
 				const noteTaskSectionId = entry.sectionName
-					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot)
+					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot, noteTaskSectionWarnings)
 					: undefined;
-				console.log(`[NoteTask] "${entry.noteTitle}" status="${entry.noteStatus}" sectionName="${entry.sectionName ?? '(none)'}" sectionId="${noteTaskSectionId ?? '(none)'}" projectId="${remoteItem?.project_id ?? '(none)'}" modified="${entry.modified ?? ''}" syncedAt="${entry.noteTaskSyncedAt ?? ''}"`);
+				phaseErrors.push(...noteTaskSectionWarnings.map((w) => `NoteTask "${entry.noteTitle}": ${w}`));
 
 				if (!remoteItem || remoteItem.is_deleted) {
 					// Task absent from active items — check if deleted vs completed
@@ -372,7 +409,6 @@ export class SyncService {
 					// to restore the item to its original section, undoing the item_move.
 					const remoteChecked = Boolean(remoteItem.checked);
 					const needsStatusChange = isDoneStatus !== remoteChecked;
-					console.log(`[NoteTask] PUSH "${entry.noteTitle}" → sectionId="${noteTaskSectionId ?? '(none)'}" isDone=${needsStatusChange ? isDoneStatus : '(skip)'} remoteSection="${remoteItem.section_id ?? '(none)'}"`);
 					await todoistClient.updateTask({
 						id: entry.noteTaskId,
 						content: newContent,
@@ -495,11 +531,24 @@ export class SyncService {
 		const ancestorCount = importableWithAncestors.length - importableItems.length;
 		const projectTaskMsg = projectTasksCreated > 0 ? `, ${projectTasksCreated} project task(s) created` : '';
 		const noteTaskMsg = (noteTasksAutoCreated > 0 || noteTasksUpdated > 0 || noteTasksPulled > 0) ? `, ${noteTasksAutoCreated} NoteTask(s) created, ${noteTasksUpdated} pushed, ${noteTasksPulled} pulled` : '';
-		const errorSuffix = phaseErrors.length > 0 ? ` [${phaseErrors.length} phase error(s): ${phaseErrors.join('; ')}]` : '';
+		const errorSuffix = phaseErrors.length > 0 ? ` [${phaseErrors.length} issue(s): ${phaseErrors.join('; ')}]` : '';
 		const message = `Synced ${importableItems.length} importable task(s) (+${ancestorCount} ancestors): ${pendingLocalCreates.length} created remotely, ${pendingLocalUpdates.length} updates pushed, ${taskResult.created} created, ${taskResult.updated} updated, ${missingHandled} missing handled, ${linkedChecklistUpdates} checklist lines refreshed${projectTaskMsg}${noteTaskMsg}.${errorSuffix}`;
+		// Build a concise notification message
+		const shortParts: string[] = [];
+		const fromTodoist = taskResult.created + taskResult.updated;
+		if (fromTodoist > 0) shortParts.push(`${fromTodoist} from Todoist`);
+		const pushed = pendingLocalCreates.length + pendingLocalUpdates.length;
+		if (pushed > 0) shortParts.push(`${pushed} pushed`);
+		if (missingHandled > 0) shortParts.push(`${missingHandled} resolved`);
+		const noteTaskActivity = noteTasksAutoCreated + noteTasksUpdated + noteTasksPulled;
+		if (noteTaskActivity > 0) shortParts.push(`${noteTaskActivity} NoteTasks`);
+		if (projectTasksCreated > 0) shortParts.push(`${projectTasksCreated} project tasks`);
+		const shortBase = shortParts.length > 0 ? shortParts.join(', ') : 'nothing to do';
+		const shortMessage = phaseErrors.length > 0 ? `${shortBase} — ${phaseErrors.length} issue(s)` : shortBase;
 		return {
 			ok: phaseErrors.length === 0,
 			message,
+			shortMessage,
 			imported: importableWithAncestors.length,
 			created: taskResult.created,
 			updated: taskResult.updated,
@@ -578,6 +627,7 @@ function resolveSectionId(
 	sectionName: string | undefined,
 	projectId: string | undefined,
 	snapshot: { sections: Array<{ id: string; name: string; project_id: string }> },
+	warnings?: string[],
 ): string | undefined {
 	if (sectionId?.trim()) {
 		return sectionId.trim();
@@ -589,8 +639,9 @@ function resolveSectionId(
 	const section = projectSections.find(
 		(item) => item.name.toLowerCase() === sectionName.trim().toLowerCase(),
 	);
-	if (!section) {
-		console.log(`[resolveSectionId] Section "${sectionName}" not found in project "${projectId}". Available sections: ${projectSections.map((s) => `"${s.name}"`).join(', ') || '(none)'}`);
+	if (!section && warnings) {
+		const available = projectSections.map((s) => `"${s.name}"`).join(', ') || '(none)';
+		warnings.push(`Section "${sectionName}" not found (available: ${available})`);
 	}
 	return section?.id;
 }

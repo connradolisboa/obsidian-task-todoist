@@ -138,7 +138,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		}
 	}
 
-	async runImportSync(): Promise<{ ok: boolean; message: string }> {
+	async runImportSync(): Promise<{ ok: boolean; message: string; shortMessage?: string }> {
 		if (this.syncLock !== null) {
 			this.syncQueued = true;
 			return { ok: false, message: 'Sync already running. Queued another run.' };
@@ -466,8 +466,8 @@ export default class TaskTodoistPlugin extends Plugin {
 			name: 'Sync todoist now',
 			callback: async () => {
 				const result = await this.runImportSync();
-				const prefix = result.ok ? 'Success:' : 'Failed:';
-				notify(this.settings, `${prefix} ${result.message}`, 8000);
+				const prefix = result.ok ? 'Sync:' : 'Sync failed:';
+				notify(this.settings, `${prefix} ${result.shortMessage ?? result.message}`, 8000);
 			},
 		});
 		this.addCommand({
@@ -498,8 +498,8 @@ export default class TaskTodoistPlugin extends Plugin {
 	private registerRibbonCommands(): void {
 		this.addRibbonIcon('sync', 'Sync Todoist now', async () => {
 			const result = await this.runImportSync();
-			const prefix = result.ok ? 'Success:' : 'Failed:';
-			notify(this.settings, `${prefix} ${result.message}`, 8000);
+			const prefix = result.ok ? 'Sync:' : 'Sync failed:';
+			notify(this.settings, `${prefix} ${result.shortMessage ?? result.message}`, 8000);
 		});
 	}
 
@@ -539,12 +539,13 @@ export default class TaskTodoistPlugin extends Plugin {
 
 			if (this.settings.showScheduledSyncNotices) {
 				const prefix = result.ok ? 'Scheduled sync:' : 'Scheduled sync failed:';
-				notify(this.settings, `${prefix} ${result.message}`, result.ok ? 3500 : 5000);
+				const displayMsg = result.shortMessage ?? result.message;
+				notify(this.settings, `${prefix} ${displayMsg}`, result.ok ? 3500 : 5000);
 				return;
 			}
 
 			if (!result.ok) {
-				notify(this.settings, `Scheduled sync failed: ${result.message}`, 5000);
+				notify(this.settings, `Scheduled sync failed: ${result.shortMessage ?? result.message}`, 5000);
 			}
 		} catch (err) {
 			console.error('[TaskTodoist] Scheduled sync threw unexpectedly:', err);

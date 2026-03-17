@@ -832,6 +832,13 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.setPlaceholder('goal:Goals,effort:Efforts')
 					.setValue(this.plugin.settings.noteTaskTagProjectMap)
 					.onChange(async (value) => {
+						const trimmed = value.trim();
+						if (trimmed) {
+							const invalid = trimmed.split(',').map((e) => e.trim()).filter((e) => e && !e.includes(':'));
+							if (invalid.length > 0) {
+								notify(this.plugin.settings, `Tag→project: invalid entries missing ":" — ${invalid.join(', ')}`, 5000);
+							}
+						}
 						this.plugin.settings.noteTaskTagProjectMap = value;
 						await this.plugin.saveSettings();
 					});
@@ -914,6 +921,13 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.setPlaceholder('Active:Active,Ongoing:Ongoing,Backlog:Backlog,Future:Future')
 					.setValue(this.plugin.settings.noteTaskStatusSectionMap)
 					.onChange(async (value) => {
+						const trimmed = value.trim();
+						if (trimmed) {
+							const invalid = trimmed.split(',').map((e) => e.trim()).filter((e) => e && !e.includes(':'));
+							if (invalid.length > 0) {
+								notify(this.plugin.settings, `Status→section: invalid entries missing ":" — ${invalid.join(', ')}`, 5000);
+							}
+						}
 						this.plugin.settings.noteTaskStatusSectionMap = value;
 						await this.plugin.saveSettings();
 					});
