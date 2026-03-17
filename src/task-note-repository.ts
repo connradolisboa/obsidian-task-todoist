@@ -913,7 +913,14 @@ export class TaskNoteRepository {
 				// --- Deleted task ---
 				const targetStatus = 'deleted_remote';
 
-				if (deletedTaskMode === 'stop-syncing') {
+				if (deletedTaskMode === 'delete') {
+				// Delete the file from vault
+				await this.app.vault.delete(entry.file);
+				changed += 1;
+				continue;
+			}
+
+			if (deletedTaskMode === 'stop-syncing') {
 					// Mark deleted_remote, set is_deleted flag, and remove todoist_id so it's no longer tracked
 					if (currentSyncStatus === targetStatus && !cachedFrontmatter?.[p.todoistId]) {
 						continue;

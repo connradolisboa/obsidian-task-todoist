@@ -451,12 +451,13 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 
 		new Setting(el)
 			.setName('Behavior for deleted tasks')
-			.setDesc('What to do when a task is deleted in Todoist. The note is always marked with sync status deleted_remote. "Stop syncing" also removes the Todoist ID so the note is no longer tracked.')
+			.setDesc('What to do when a task is deleted in Todoist. "Keep in place" or "Move to folder" marks the note as deleted_remote. "Stop syncing" also removes the Todoist ID. "Delete" removes the note file entirely.')
 			.addDropdown((dropdown) => {
 				dropdown
 					.addOption('keep-in-place', 'Keep in place')
 					.addOption('move-to-folder', 'Move to another folder')
 					.addOption('stop-syncing', 'Stop syncing')
+					.addOption('delete', 'Delete note file')
 					.setValue(this.plugin.settings.deletedTaskMode)
 					.onChange(async (value) => {
 						this.plugin.settings.deletedTaskMode = value as DeletedTaskMode;

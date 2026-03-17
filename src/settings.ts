@@ -1,7 +1,7 @@
 export const DEFAULT_TODOIST_TOKEN_SECRET_NAME = 'todoist-api';
 
 export type CompletedTaskMode = 'keep-in-place' | 'move-to-folder';
-export type DeletedTaskMode = 'keep-in-place' | 'move-to-folder' | 'stop-syncing';
+export type DeletedTaskMode = 'keep-in-place' | 'move-to-folder' | 'stop-syncing' | 'delete';
 export type ImportProjectScope = 'all-projects' | 'allow-list-by-name';
 export type TodoistLinkStyle = 'app' | 'web';
 export type ConflictResolution = 'local-wins' | 'remote-wins';
