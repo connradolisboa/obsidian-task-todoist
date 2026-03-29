@@ -339,12 +339,11 @@ export class SyncService {
 				const filePath = encodeURIComponent(entry.file.path);
 				const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
 
-				// Resolve section ID for push based on note status (uses remoteItem.project_id when available)
-				const noteTaskSectionWarnings: string[] = [];
+				// Resolve section ID for push based on note status (uses remoteItem.project_id when available).
+				// Section lookup is best-effort: if the section doesn't exist in this project, skip silently.
 				const noteTaskSectionId = entry.sectionName
-					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot, noteTaskSectionWarnings)
+					? resolveSectionId(undefined, entry.sectionName, remoteItem?.project_id ?? undefined, snapshot)
 					: undefined;
-				phaseErrors.push(...noteTaskSectionWarnings.map((w) => `NoteTask "${entry.noteTitle}": ${w}`));
 
 				if (!remoteItem || remoteItem.is_deleted) {
 					// Task absent from active items — check if deleted vs completed

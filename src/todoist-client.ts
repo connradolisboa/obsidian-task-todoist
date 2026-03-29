@@ -94,6 +94,11 @@ export interface TodoistTaskUpdateInput {
 	clearDuration?: boolean;
 }
 
+export interface TodoistCreateProjectInput {
+	name: string;
+	parent_id?: string;
+}
+
 interface TodoistSyncResponse {
 	user?: { id?: string | number };
 	items?: Array<Record<string, unknown>>;
@@ -275,6 +280,39 @@ export class TodoistClient {
 		const mappedId = payload.temp_id_mapping?.[tempId];
 		if (!mappedId) {
 			throw new Error('Todoist create task response did not include a task ID.');
+		}
+		return mappedId;
+	}
+
+	async createProject(input: TodoistCreateProjectInput): Promise<string> {
+		const commandUuid = generateUuid();
+		const tempId = generateUuid();
+		const args: Record<string, unknown> = { name: input.name };
+		if (input.parent_id) args.parent_id = input.parent_id;
+
+		const response = await this.syncWithCommands([{
+			type: 'project_add',
+			uuid: commandUuid,
+			temp_id: tempId,
+			args,
+		}]);
+
+		if (response.status === 401) {
+			throw new Error('Todoist authentication failed. Check your token.');
+		}
+		if (response.status !== 200) {
+			throw new Error(`Todoist create project failed with status ${response.status}.`);
+		}
+
+		const payload = response.json as TodoistSyncResponse;
+		const status = payload.sync_status?.[commandUuid];
+		if (status !== 'ok') {
+			throw new Error('Todoist did not accept the create project command.');
+		}
+
+		const mappedId = payload.temp_id_mapping?.[tempId];
+		if (!mappedId) {
+			throw new Error('Todoist create project response did not include a project ID.');
 		}
 		return mappedId;
 	}

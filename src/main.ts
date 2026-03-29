@@ -7,8 +7,8 @@ import {
 	type TaskTodoistSettings,
 } from './settings';
 import { TaskTodoistSettingTab } from './settings-tab';
-import { TodoistClient, type TodoistProjectSectionLookup } from './todoist-client';
-import { SyncService } from './sync-service';
+import { TodoistClient, type TodoistCreateProjectInput, type TodoistProjectSectionLookup } from './todoist-client';
+import { SyncService, type SyncRunResult } from './sync-service';
 import { CreateTaskModal } from './create-task-modal';
 import { createLocalTaskNote, type LocalTaskNoteInput } from './task-note-factory';
 import { registerInlineTaskConverter } from './inline-task-converter';
@@ -23,6 +23,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private todoistApiToken: string | null = null;
 	private lastConnectionCheckMessage = 'No check run yet.';
 	private lastSyncMessage = 'No sync run yet.';
+	private lastSyncResult: SyncRunResult | null = null;
 	private readonly recentTaskMetaByLink = new Map<string, {
 		projectName?: string;
 		sectionName?: string;
@@ -86,6 +87,18 @@ export default class TaskTodoistPlugin extends Plugin {
 
 	getLastSyncMessage(): string {
 		return this.lastSyncMessage;
+	}
+
+	logDiagnostics(): void {
+		const { todoistApiToken: _token, ...safeSettings } = this.settings as typeof this.settings & { todoistApiToken?: unknown };
+		console.group('[obsidian-task-todoist] Diagnostics');
+		console.log('Last sync result:', this.lastSyncResult ?? '(no sync run yet)');
+		if (this.lastSyncResult?.phaseErrors?.length) {
+			console.warn('Phase errors:', this.lastSyncResult.phaseErrors);
+		}
+		console.log('Settings:', safeSettings);
+		console.log('Vault index snapshot:', this.vaultIndex?.get());
+		console.groupEnd();
 	}
 
 	async getTodoistProjectSectionLookup(forceRefresh = false): Promise<TodoistProjectSectionLookup> {
@@ -164,7 +177,7 @@ export default class TaskTodoistPlugin extends Plugin {
 						console.error('[TaskTodoist] Failed to persist sync token:', saveErr);
 					}
 				}
-				this.setLastSync(result.message);
+				this.setLastSync(result.message, result);
 				return result;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -287,6 +300,106 @@ export default class TaskTodoistPlugin extends Plugin {
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			notify(this.settings, `Failed to create NoteTask: ${message}`, 6000);
+		}
+	}
+
+	async createProjectForCurrentNote(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!file) {
+			notify(this.settings, 'No active note.', 4000);
+			return;
+		}
+
+		const p = getPropNames(this.settings);
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+
+		const existingProjectId = fm ? fm[p.todoistProjectId] : undefined;
+		if (typeof existingProjectId === 'string' && existingProjectId.trim()) {
+			notify(this.settings, 'This note is already a Todoist project.', 4000);
+			return;
+		}
+
+		await this.loadTodoistApiToken();
+		const token = this.todoistApiToken;
+		if (!token) {
+			notify(this.settings, 'No Todoist API token configured.', 4000);
+			return;
+		}
+
+		try {
+			const projectName = file.basename;
+
+			// Resolve parent project from parent_project_link wikilink
+			let parentProjectId: string | undefined;
+			if (fm) {
+				const rawParentLink = fm[p.todoistParentProjectLink];
+				if (typeof rawParentLink === 'string' && rawParentLink.trim()) {
+					const match = rawParentLink.match(/^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/);
+					if (match) {
+						const linkedFile = this.app.metadataCache.getFirstLinkpathDest(match[1]?.trim() ?? '', file.path);
+						if (linkedFile) {
+							const linkedFm = this.app.metadataCache.getFileCache(linkedFile)?.frontmatter as Record<string, unknown> | undefined;
+							const pid = linkedFm?.[p.todoistProjectId];
+							if (typeof pid === 'string' && pid.trim()) {
+								parentProjectId = pid.trim();
+							} else {
+								console.warn('[obsidian-task-todoist] parent_project_link target has no todoist_project_id — skipping parent.');
+							}
+						}
+					}
+				}
+			}
+
+			const client = new TodoistClient(token);
+
+			const input: TodoistCreateProjectInput = { name: projectName };
+			if (parentProjectId) input.parent_id = parentProjectId;
+			const projectId = await client.createProject(input);
+
+			const projectUrl = `todoist://project?id=${projectId}`;
+
+			// NoteTask handling: if there's an existing NoteTask, move it into the new project
+			const rawNoteTaskId = fm ? fm[p.todoistNoteTaskId] : undefined;
+			const noteTaskId = typeof rawNoteTaskId === 'string' && rawNoteTaskId.trim() ? rawNoteTaskId.trim() : undefined;
+			let noteTaskMoveFailed = false;
+			if (noteTaskId) {
+				try {
+					await client.updateTask({ id: noteTaskId, projectId });
+				} catch (moveErr) {
+					noteTaskMoveFailed = true;
+					console.error('[obsidian-task-todoist] Failed to move NoteTask into new project:', moveErr);
+				}
+			}
+
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				const f = frontmatter as Record<string, unknown>;
+				f[p.todoistProjectId] = projectId;
+				f[p.todoistProjectName] = projectName;
+				f[p.todoistProjectColor] = null;
+				f[p.todoistUrl] = projectUrl;
+				if (noteTaskId) {
+					// Unify: mark the NoteTask as the project task too
+					f[p.todoistProjectTaskId] = noteTaskId;
+				} else if (this.settings.createProjectTasks) {
+					// No NoteTask — set empty string sentinel so next sync creates a project task
+					f[p.todoistProjectTaskId] = '';
+				}
+				if (!f[p.vaultId]) {
+					f[p.vaultId] = crypto.randomUUID();
+				}
+				touchModifiedDate(f, this.settings);
+			});
+
+			this.vaultIndex?.invalidate();
+
+			if (noteTaskMoveFailed) {
+				notify(this.settings, `Project "${projectName}" created, but failed to move NoteTask — move it manually in Todoist.`, 8000);
+			} else {
+				notify(this.settings, `Project "${projectName}" created in Todoist.`, 4000);
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			notify(this.settings, `Failed to create project: ${message}`, 6000);
 		}
 	}
 
@@ -493,6 +606,13 @@ export default class TaskTodoistPlugin extends Plugin {
 				await this.createNoteTaskForCurrentNote();
 			},
 		});
+		this.addCommand({
+			id: 'create-project-from-note',
+			name: 'Create Todoist project from current note',
+			callback: async () => {
+				await this.createProjectForCurrentNote();
+			},
+		});
 	}
 
 	private registerRibbonCommands(): void {
@@ -508,9 +628,10 @@ export default class TaskTodoistPlugin extends Plugin {
 		this.lastConnectionCheckMessage = `${message} (${checkedAt})`;
 	}
 
-	private setLastSync(message: string): void {
+	private setLastSync(message: string, result?: SyncRunResult): void {
 		const syncedAt = new Date().toLocaleString();
 		this.lastSyncMessage = `${message} (${syncedAt})`;
+		if (result) this.lastSyncResult = result;
 	}
 
 	private configureScheduledSync(): void {

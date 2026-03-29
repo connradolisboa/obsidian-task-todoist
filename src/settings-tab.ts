@@ -383,6 +383,16 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			.setName('Last sync')
 			.setDesc(this.plugin.getLastSyncMessage());
 
+		new Setting(el)
+			.setName('Debug diagnostics')
+			.setDesc('Log the last sync result, phase errors, and settings to the developer console (Ctrl+Shift+I / Cmd+Option+I).')
+			.addButton((button) => {
+				button.setButtonText('Log to console').onClick(() => {
+					this.plugin.logDiagnostics();
+					notify(this.plugin.settings, 'Diagnostics logged — open the developer console to view.', 5000);
+				});
+			});
+
 		new Setting(el).setName('File organization').setHeading();
 
 		new Setting(el)
