@@ -276,6 +276,27 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 				});
 			});
 
+		new Setting(el).setName('Label tags').setHeading();
+
+		new Setting(el)
+			.setName('Label tags')
+			.setDesc(
+				'Comma-separated Todoist label names that are mirrored as Obsidian note tags (bidirectional). ' +
+				'When a task has one of these labels in Todoist, it is also added to the note\'s tags property. ' +
+				'When one of these tags is added to a note, the matching label is pushed to Todoist on the next sync. ' +
+				'Example: "important, urgent" — a task with the "important" label will get #important added to its note tags, and vice versa.'
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('important, urgent')
+					.setValue(this.plugin.settings.labelTags)
+					.onChange(async (value) => {
+						this.plugin.settings.labelTags = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
 		new Setting(el).setName('Exclusion rules').setHeading();
 
 		new Setting(el)

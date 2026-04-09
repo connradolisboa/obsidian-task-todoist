@@ -1366,7 +1366,8 @@ export class TaskNoteRepository {
 			const dueDate = toOptionalString(frontmatter[p.todoistDue]);
 			const dueString = toOptionalString(frontmatter[p.todoistDueString]);
 			const priority = toOptionalNumber(frontmatter[p.todoistPriority]);
-			const labels = toStringArray(frontmatter[p.todoistLabels]);
+			const baseLabels = toStringArray(frontmatter[p.todoistLabels]);
+			const labels = mergeLabelTagsIntoLabels(baseLabels, parseLabelTagSet(this.settings.labelTags), frontmatter[p.tags]);
 			const deadline = toOptionalString(frontmatter[p.todoistDeadline]);
 			const duration = toOptionalNumber(frontmatter[p.todoistDuration]);
 			const signature = buildTodoistSyncSignature({
@@ -1870,7 +1871,8 @@ export class TaskNoteRepository {
 			const dueDate = toOptionalString(frontmatter[p.todoistDue]);
 			const dueString = toOptionalString(frontmatter[p.todoistDueString]);
 			const priority = toOptionalNumber(frontmatter[p.todoistPriority]);
-			const labels = toStringArray(frontmatter[p.todoistLabels]);
+			const baseLabels = toStringArray(frontmatter[p.todoistLabels]);
+			const labels = mergeLabelTagsIntoLabels(baseLabels, parseLabelTagSet(this.settings.labelTags), frontmatter[p.tags]);
 			const deadline = toOptionalString(frontmatter[p.todoistDeadline]);
 			const duration = toOptionalNumber(frontmatter[p.todoistDuration]);
 			const signature = buildTodoistSyncSignature({
@@ -2068,6 +2070,12 @@ export class TaskNoteRepository {
 				data[p.tags] = [defaultTag];
 			}
 
+			// Merge label-tags: add Todoist labels that are configured as label-tags
+			const labelTagSet = parseLabelTagSet(this.settings.labelTags);
+			if (labelTagSet.size > 0) {
+				data[p.tags] = mergeLabelTagsIntoTags(data[p.tags], labelTagSet, item.labels ?? []);
+			}
+
 			// Task fields: always set to reflect Todoist truth
 			setTaskTitle(data, item.content, this.settings);
 			setTaskStatus(data, item.checked ? 'done' : 'open', this.settings);
@@ -2192,6 +2200,13 @@ export class TaskNoteRepository {
 			data[p.todoistProjectLink] = projectLink;
 			data[p.todoistSectionLink] = sectionLink;
 			data[p.todoistLabels] = item.labels ?? [];
+
+			// Merge label-tags: sync configured label names bidirectionally into note tags
+			const labelTagSet = parseLabelTagSet(this.settings.labelTags);
+			if (labelTagSet.size > 0) {
+				data[p.tags] = mergeLabelTagsIntoTags(data[p.tags], labelTagSet, item.labels ?? []);
+			}
+
 			data[p.todoistParentId] = item.parent_id ?? '';
 			// Clear the parent wiki-link when the task no longer has a parent;
 			// applyParentLinks will re-set it for tasks that still have one.
@@ -2920,6 +2935,56 @@ function buildRemoteImportSignature(item: TodoistItem, maps: ProjectSectionMaps)
 		item.deadline?.date ?? '',
 		item.duration?.amount ?? null,
 	]));
+}
+
+function parseLabelTagSet(labelTags: string): Set<string> {
+	return new Set(
+		labelTags.split(',').map((l) => l.trim().toLowerCase()).filter(Boolean),
+	);
+}
+
+/**
+ * Given the current note tags array, a set of configured label-tags, and the
+ * Todoist labels currently on the task, returns an updated tags array where:
+ *  - tags that are label-tags but are NOT in currentLabels are removed
+ *  - tags that are label-tags and ARE in currentLabels are added (if missing)
+ *  - all other tags are left untouched
+ */
+function mergeLabelTagsIntoTags(
+	currentTags: unknown,
+	labelTagSet: Set<string>,
+	currentLabels: string[],
+): string[] {
+	const labelsLower = new Set(currentLabels.map((l) => l.toLowerCase()));
+	const tags: string[] = Array.isArray(currentTags)
+		? (currentTags as unknown[]).map((t) => String(t))
+		: typeof currentTags === 'string'
+		? (currentTags as string).split(/[\s,]+/).filter(Boolean)
+		: [];
+	// Remove label-tags that are no longer in Todoist labels
+	const filtered = tags.filter((t) => !labelTagSet.has(t.replace(/^#/, '').toLowerCase()));
+	// Add label-tags that are present in Todoist labels
+	const toAdd = [...labelTagSet].filter((lt) => labelsLower.has(lt) && !filtered.map((t) => t.replace(/^#/, '').toLowerCase()).includes(lt));
+	return [...filtered, ...toAdd];
+}
+
+/**
+ * Merges note tags that match the configured label-tags into the given labels
+ * array (for Obsidian→Todoist push).
+ */
+function mergeLabelTagsIntoLabels(
+	labels: string[],
+	labelTagSet: Set<string>,
+	rawTags: unknown,
+): string[] {
+	if (labelTagSet.size === 0) return labels;
+	const noteTags: string[] = Array.isArray(rawTags)
+		? (rawTags as unknown[]).map((t) => String(t).replace(/^#/, '').toLowerCase())
+		: typeof rawTags === 'string'
+		? (rawTags as string).split(/[\s,]+/).map((t) => t.replace(/^#/, '').toLowerCase()).filter(Boolean)
+		: [];
+	const tagLabels = noteTags.filter((t) => labelTagSet.has(t));
+	return Array.from(new Set([...labels, ...tagLabels]));
 }
 
 function buildTodoistSyncSignature(input: {

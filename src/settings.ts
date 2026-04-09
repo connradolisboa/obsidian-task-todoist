@@ -189,6 +189,8 @@ export interface TaskTodoistSettings {
 	noteTaskStatusSectionMap: string;
 	// NoteTask: sync note tags (from the tags/aliases property) as Todoist labels on push
 	noteTaskSyncTagsAsLabels: boolean;
+	// Label tags: Todoist label names that are also mirrored as note tags (bidirectional)
+	labelTags: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -247,4 +249,5 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	noteTaskTagProjectMap: '',
 	noteTaskStatusSectionMap: '',
 	noteTaskSyncTagsAsLabels: false,
+	labelTags: '',
 };
