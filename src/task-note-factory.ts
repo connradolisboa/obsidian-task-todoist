@@ -253,6 +253,11 @@ export function sanitizeFileName(value: string): string {
 		.slice(0, 80);
 }
 
+/** Converts markdown links [text](url) to their display text only. */
+export function stripMarkdownLinks(text: string): string {
+	return text.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+}
+
 /**
  * Returns a collision-safe sanitized folder name for a Todoist project.
  * When two or more projects share the same sanitized name, the Todoist project ID

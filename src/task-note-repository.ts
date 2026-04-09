@@ -22,6 +22,7 @@ import {
 	buildTodoistProjectUrl,
 	buildTodoistSectionUrl,
 	sanitizeFileName,
+	stripMarkdownLinks,
 	buildSanitizedProjectFolderName,
 	buildSanitizedSectionFolderName,
 	buildProjectFolderSegments,
@@ -1965,7 +1966,7 @@ export class TaskNoteRepository {
 		if (!this.settings.autoRenameTaskFiles) {
 			return file;
 		}
-		const desiredBaseName = sanitizeFileName(title.trim());
+		const desiredBaseName = sanitizeFileName(stripMarkdownLinks(title.trim()));
 		if (!desiredBaseName || file.basename === desiredBaseName) {
 			return file;
 		}
@@ -2687,7 +2688,7 @@ export class TaskNoteRepository {
 			sectionProjectIdById,
 			sectionNameById,
 		);
-		const base = sanitizeFileName(taskTitle) || `Task-${todoistId}`;
+		const base = sanitizeFileName(stripMarkdownLinks(taskTitle)) || `Task-${todoistId}`;
 		const basePath = normalizePath(`${folder}/${base}.md`);
 		if (!this.app.vault.getAbstractFileByPath(basePath)) {
 			return basePath;
@@ -2697,7 +2698,7 @@ export class TaskNoteRepository {
 
 	private async getUniqueFilePathInFolder(folder: string, preferredFileName: string, currentPath?: string): Promise<string> {
 		const normalizedFolder = normalizePath(folder);
-		const sanitizedName = sanitizeFileName(preferredFileName.replace(/\.md$/i, '')) || 'Task';
+		const sanitizedName = sanitizeFileName(stripMarkdownLinks(preferredFileName.replace(/\.md$/i, ''))) || 'Task';
 		let candidatePath = normalizePath(`${normalizedFolder}/${sanitizedName}.md`);
 		const existing = this.app.vault.getAbstractFileByPath(candidatePath);
 		if (!existing) {
