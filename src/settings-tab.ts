@@ -972,6 +972,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		this.addPropNameSetting(el, 'Todoist priority', 'Task priority (1–4).', 'todoistPriority');
 		this.addPropNameSetting(el, 'Priority label', 'Human-readable priority: none, low, medium, or high.', 'todoistPriorityLabel');
 		this.addPropNameSetting(el, 'Todoist duration', 'Task duration in minutes, synced two-way with Todoist.', 'todoistDuration');
+		this.addPropNameSetting(el, 'Completed date', 'Date set when the task is completed in Todoist (YYYY-MM-DD). Only written once; not overwritten on subsequent syncs.', 'completedAt');
 		this.addPropNameSetting(el, 'Todoist is deleted', 'Set to true when the task was confirmed deleted in Todoist (as opposed to completed).', 'todoistIsDeleted');
 
 		new Setting(el).setName('Due dates & recurrence').setHeading();

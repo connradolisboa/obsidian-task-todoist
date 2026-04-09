@@ -986,6 +986,10 @@ export class TaskNoteRepository {
 						setTaskStatus(data, 'done', this.settings);
 						data[p.todoistSyncStatus] = targetStatus;
 						data[p.todoistLastImportedAt] = new Date().toISOString();
+						if (!data[p.completedAt]) {
+							const now = new Date();
+							data[p.completedAt] = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+						}
 					});
 				}
 

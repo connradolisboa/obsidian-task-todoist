@@ -65,6 +65,8 @@ export interface PropNames {
 	todoistNoteTaskId: string;
 	// NoteTask: timestamp of the last NoteTask sync cycle for this note (used for Obsidian-wins conflict resolution)
 	todoistNoteTaskSyncedAt: string;
+	// Date the task was completed (set when Todoist marks the task as done)
+	completedAt: string;
 }
 
 export const DEFAULT_PROP_NAMES: PropNames = {
@@ -113,6 +115,7 @@ export const DEFAULT_PROP_NAMES: PropNames = {
 	todoistDuration: 'todoist_duration',
 	todoistNoteTaskId: 'todoist_note_task_id',
 	todoistNoteTaskSyncedAt: 'todoist_note_task_synced_at',
+	completedAt: 'completed',
 };
 
 export interface TaskTodoistSettings {
