@@ -450,12 +450,13 @@ export class SyncService {
 							remoteDescription,
 						);
 						noteTasksPulled += 1;
-					} else {
-						// Nothing changed on either side; still update the sync timestamp
-						await repository.markNoteTaskSyncedAt(entry.file);
 					}
-				}
-			} catch (e) {
+					// Nothing changed on either side — skip write entirely.
+					// Writing the sync timestamp here would update mtime, which on the
+					// next sync would equal noteTaskSyncedAt again, creating a
+					// perpetual write loop with no functional benefit.
+					}
+				} catch (e) {
 				phaseErrors.push(`NoteTask sync "${entry.noteTitle}": ${errorMessage(e)}`);
 			}
 		}

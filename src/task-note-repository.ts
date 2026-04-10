@@ -331,7 +331,12 @@ export class TaskNoteRepository {
 		const cachedName =
 			typeof fm[p.todoistProjectName] === 'string' ? (fm[p.todoistProjectName] as string) :
 			(typeof fm['project_name'] === 'string' ? (fm['project_name'] as string) : null);
-		const cachedColor = fm[p.todoistProjectColor] ?? undefined;
+		// Must distinguish "property absent" (undefined) from "property present but null".
+		// Using `?? undefined` would incorrectly coerce null→undefined, causing null !== null
+		// comparisons that trigger a write on every sync for projects with no color set.
+		const rawCachedColor = fm[p.todoistProjectColor];
+		const cachedColor: string | null | undefined =
+			rawCachedColor === undefined ? undefined : (typeof rawCachedColor === 'string' ? rawCachedColor : null);
 		const colorChanged = projectColor !== undefined && cachedColor !== projectColor;
 		const nameChanged = cachedName !== null && cachedName !== projectName;
 		if (!nameChanged && !colorChanged) return;

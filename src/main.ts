@@ -41,6 +41,7 @@ export default class TaskTodoistPlugin extends Plugin {
 	private lookupCache: { expiresAt: number; value: TodoistProjectSectionLookup } | null = null;
 	private static readonly UNCHECKED_TASK_LINE_REGEX = /^(\s*[-*+]\s+\[\s\]\s+)(.+)$/;
 
+
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		await this.loadTodoistApiToken();
