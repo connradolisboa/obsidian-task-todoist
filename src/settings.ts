@@ -191,6 +191,14 @@ export interface TaskTodoistSettings {
 	noteTaskSyncTagsAsLabels: boolean;
 	// Label tags: Todoist label names that are also mirrored as note tags (bidirectional)
 	labelTags: string;
+	// Daily Note Logger: append task events (added/completed) to the daily note
+	dailyNoteEnabled: boolean;
+	// Comma-separated Todoist label names to watch for daily note events
+	dailyNoteLabels: string;
+	// Path template for the daily note file (supports {{YYYY}}, {{MM}}, {{DD}}, {{dddd}}, {{Q}}, {{QQ}}, etc.)
+	dailyNotePath: string;
+	// Line template appended to the daily note ({{taskLink}}, {{taskTitle}}, {{taskLabel}}, {{taskAction}}, {{taskProject}})
+	dailyNoteTemplate: string;
 }
 
 export const DEFAULT_SETTINGS: TaskTodoistSettings = {
@@ -250,4 +258,8 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	noteTaskStatusSectionMap: '',
 	noteTaskSyncTagsAsLabels: false,
 	labelTags: '',
+	dailyNoteEnabled: false,
+	dailyNoteLabels: '',
+	dailyNotePath: 'Daily/{{YYYY}}/{{YYYY-MM-DD}}',
+	dailyNoteTemplate: '- {{taskAction}}: {{taskLink}} ({{taskLabel}})',
 };

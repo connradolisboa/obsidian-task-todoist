@@ -4,9 +4,10 @@ import { getPropNames } from './task-frontmatter';
 import { filterImportableItems } from './import-rules';
 import { TodoistClient } from './todoist-client';
 import type { TodoistItem, TodoistSyncSnapshot } from './todoist-client';
-import type { App } from 'obsidian';
+import type { App, TFile } from 'obsidian';
 import { syncLinkedChecklistStates } from './linked-checklist-sync';
 import { type VaultIndex, buildVaultIndexSnapshot } from './vault-index';
+import { appendEventsToDailyNote, type DailyNoteEvent } from './daily-note-service';
 
 	export interface SyncRunResult {
 	ok: boolean;
@@ -213,8 +214,16 @@ export class SyncService {
 		const projectParentIdById = new Map(snapshot.projects.map((project) => [project.id, project.parent_id]));
 		const projectColorById = new Map(snapshot.projects.map((project) => [project.id, project.color]));
 
+		// Build watched label set for daily note events (empty = feature off)
+		const watchedLabelSet: Set<string> = this.settings.dailyNoteEnabled && this.settings.dailyNoteLabels.trim()
+			? new Set(this.settings.dailyNoteLabels.split(',').map((l) => l.trim().toLowerCase()).filter(Boolean))
+			: new Set();
+		const dailyNoteEvents: DailyNoteEvent[] = [];
+
 		// Phase 7: import/upsert task notes (non-critical — degraded sync still useful)
-		let taskResult = { created: 0, updated: 0 };
+		let taskResult: { created: number; updated: number; newlyCreatedFiles: Map<string, TFile> } = {
+			created: 0, updated: 0, newlyCreatedFiles: new Map(),
+		};
 		let existingSyncedTasks: SyncedTaskEntry[] = [];
 		try {
 			existingSyncedTasks = await repository.listSyncedTasks();
@@ -238,10 +247,66 @@ export class SyncService {
 			phaseErrors.push(`Import: ${errorMessage(e)}`);
 		}
 
+		// Get a fresh vault snapshot (Phase 7 invalidated the index) for project note lookups
+		// Only paid when the feature is active and there are events to process.
+		const dailyNoteVaultSnapshot = watchedLabelSet.size > 0
+			? (this.vaultIndex?.get() ?? buildVaultIndexSnapshot(this.app, this.settings))
+			: null;
+
+		// Collect daily note "added" events for newly created task notes
+		if (dailyNoteVaultSnapshot && taskResult.newlyCreatedFiles.size > 0) {
+			const importableById = new Map(importableWithAncestors.map((item) => [item.id, item]));
+			for (const [todoistId, file] of taskResult.newlyCreatedFiles) {
+				const item = importableById.get(todoistId);
+				if (!item) continue;
+				const matchingLabel = (item.labels ?? []).find((l) => watchedLabelSet.has(l.toLowerCase()));
+				if (matchingLabel) {
+					dailyNoteEvents.push({
+						action: 'added',
+						file,
+						title: file.basename,
+						matchingLabel,
+						project: projectNameById.get(item.project_id) ?? '',
+						projectFile: dailyNoteVaultSnapshot.projectIndex.get(item.project_id),
+					});
+				}
+			}
+		}
+
 		// Phase 8: handle missing/deleted remote tasks (non-critical)
 		let missingHandled = 0;
 		try {
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById, recentlyDeletedIds);
+
+			// Collect daily note "completed" events before the task notes are marked done.
+			// Skip entries already marked archived_remote — they were logged on a previous sync.
+			if (dailyNoteVaultSnapshot) {
+				const p = getPropNames(this.settings);
+				for (const entry of missingEntries) {
+					if (entry.isDeletedRemote) continue;
+					const fm = this.app.metadataCache.getFileCache(entry.file)?.frontmatter as Record<string, unknown> | undefined;
+					if (!fm) continue;
+					// Dedup: only emit the first time this task is being marked archived
+					const syncStatus = typeof fm[p.todoistSyncStatus] === 'string' ? (fm[p.todoistSyncStatus] as string) : '';
+					if (syncStatus === 'archived_remote' || syncStatus === 'deleted_remote' || syncStatus === 'stopped') continue;
+					const rawLabels = fm[p.todoistLabels];
+					const labels: string[] = Array.isArray(rawLabels) ? rawLabels.map(String) : [];
+					const matchingLabel = labels.find((l) => watchedLabelSet.has(l.toLowerCase()));
+					if (!matchingLabel) continue;
+					const title = typeof fm[p.taskTitle] === 'string' ? (fm[p.taskTitle] as string) : entry.file.basename;
+					const project = typeof fm[p.todoistProjectName] === 'string' ? (fm[p.todoistProjectName] as string) : '';
+					const projectId = typeof fm[p.todoistProjectId] === 'string' ? (fm[p.todoistProjectId] as string).trim() : '';
+					dailyNoteEvents.push({
+						action: 'completed',
+						file: entry.file,
+						title,
+						matchingLabel,
+						project,
+						projectFile: projectId ? dailyNoteVaultSnapshot.projectIndex.get(projectId) : undefined,
+					});
+				}
+			}
+
 			missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
 		} catch (e) {
 			phaseErrors.push(`Missing tasks: ${errorMessage(e)}`);
@@ -526,6 +591,15 @@ export class SyncService {
 			linkedChecklistUpdates = await syncLinkedChecklistStates(this.app, this.settings);
 		} catch (e) {
 			phaseErrors.push(`Checklist sync: ${errorMessage(e)}`);
+		}
+
+		// Phase 12: append daily note events (non-critical)
+		if (dailyNoteEvents.length > 0) {
+			try {
+				await appendEventsToDailyNote(this.app, this.settings, dailyNoteEvents);
+			} catch (e) {
+				phaseErrors.push(`Daily note: ${errorMessage(e)}`);
+			}
 		}
 
 		const ancestorCount = importableWithAncestors.length - importableItems.length;

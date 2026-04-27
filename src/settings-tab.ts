@@ -4,7 +4,7 @@ import type TaskTodoistPlugin from './main';
 import { DEFAULT_PROP_NAMES } from './settings';
 import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
-type TabId = 'general' | 'import' | 'sync' | 'notes' | 'notetask' | 'properties';
+type TabId = 'general' | 'import' | 'sync' | 'notes' | 'notetask' | 'dailylog' | 'properties';
 
 const TABS: { id: TabId; label: string }[] = [
 	{ id: 'general', label: 'General' },
@@ -12,6 +12,7 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: 'sync', label: 'Sync' },
 	{ id: 'notes', label: 'Notes' },
 	{ id: 'notetask', label: 'NoteTask' },
+	{ id: 'dailylog', label: 'Daily Log' },
 	{ id: 'properties', label: 'Properties' },
 ];
 
@@ -49,6 +50,7 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 			case 'sync': this.renderSyncTab(content); break;
 			case 'notes': this.renderNotesTab(content); break;
 			case 'notetask': this.renderNoteTaskTab(content); break;
+			case 'dailylog': this.renderDailyLogTab(content); break;
 			case 'properties': this.renderPropertiesTab(content); break;
 		}
 	}
@@ -963,6 +965,90 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.size = 50;
+			});
+	}
+
+	// ── Daily Log ──────────────────────────────────────────────────────────────
+	// Append task add/complete events to the daily note based on label filters.
+
+	private renderDailyLogTab(el: HTMLElement): void {
+		new Setting(el).setName('Daily note logger').setHeading();
+
+		new Setting(el)
+			.setName('Enable daily note logger')
+			.setDesc(
+				'When enabled, tasks with the specified labels are logged to your daily note whenever they are added to Obsidian or completed in Todoist.',
+			)
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.dailyNoteEnabled).onChange(async (value) => {
+					this.plugin.settings.dailyNoteEnabled = value;
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+
+		if (!this.plugin.settings.dailyNoteEnabled) return;
+
+		new Setting(el).setName('Label filter').setHeading();
+
+		new Setting(el)
+			.setName('Watched labels')
+			.setDesc(
+				'Comma-separated Todoist label names. Tasks carrying any of these labels will be logged to the daily note when added or completed. ' +
+				'Example: "review, focus"',
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('review, focus')
+					.setValue(this.plugin.settings.dailyNoteLabels)
+					.onChange(async (value) => {
+						this.plugin.settings.dailyNoteLabels = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
+		new Setting(el).setName('Daily note path').setHeading();
+
+		new Setting(el)
+			.setName('Daily note path template')
+			.setDesc(
+				'Path to the daily note file (without .md). Date tokens are resolved at sync time. ' +
+				'Supported tokens: {{YYYY}}, {{YY}}, {{MM}}, {{M}}, {{DD}}, {{D}}, {{dddd}} (e.g. Monday), {{ddd}} (e.g. Mon), ' +
+				'{{Q}} (quarter, e.g. 2), {{QQ}} (e.g. Q2, equivalent to moment\'s [Q]Q), {{YYYY-MM}}, {{YYYY-MM-DD}}. ' +
+				'Example: Daily/{{YYYY}}/{{YYYY-MM-DD}}',
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('Daily/{{YYYY}}/{{YYYY-MM-DD}}')
+					.setValue(this.plugin.settings.dailyNotePath)
+					.onChange(async (value) => {
+						this.plugin.settings.dailyNotePath = value.trim();
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 40;
+			});
+
+		new Setting(el).setName('Entry template').setHeading();
+
+		new Setting(el)
+			.setName('Line template')
+			.setDesc(
+				'Template for each line appended to the daily note. ' +
+				'Available tokens: {{taskLink}} (wikilink to the task note), {{taskTitle}} (plain title), ' +
+				'{{taskLabel}} (the matching label), {{taskAction}} ("added" or "completed"), ' +
+				'{{taskProject}} (project name, plain text), {{taskProjectLink}} (wikilink to the project note; falls back to plain name if no project note exists). ' +
+				'Example: - {{taskAction}}: {{taskLink}} in {{taskProjectLink}} #{{taskLabel}}',
+			)
+			.addText((text) => {
+				text
+					.setPlaceholder('- {{taskAction}}: {{taskLink}} ({{taskLabel}})')
+					.setValue(this.plugin.settings.dailyNoteTemplate)
+					.onChange(async (value) => {
+						this.plugin.settings.dailyNoteTemplate = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 60;
 			});
 	}
 

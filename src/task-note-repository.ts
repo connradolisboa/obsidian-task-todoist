@@ -54,6 +54,7 @@ interface UpsertResult {
 interface SyncTaskResult {
 	created: number;
 	updated: number;
+	newlyCreatedFiles: Map<string, TFile>; // todoistId → TFile for newly created task notes
 }
 
 export interface SyncedTaskEntry {
@@ -171,6 +172,7 @@ export class TaskNoteRepository {
 		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex, duplicateTaskFiles } = this.buildVaultIndexes();
 		await this.autoResolveDuplicateIds(duplicateTaskFiles, existingByTodoistId);
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
+		const newlyCreatedFiles = new Map<string, TFile>(); // todoistId → TFile for daily note events
 		const pendingParents: ParentAssignment[] = [];
 		const seenProjectIds = new Set<string>();
 		const seenSectionIds = new Set<string>();
@@ -287,6 +289,9 @@ export class TaskNoteRepository {
 			if (targetFile) {
 				createdOrUpdatedByTodoistId.set(item.id, targetFile);
 			}
+			if (!existingFile && upsertResult.file) {
+				newlyCreatedFiles.set(item.id, upsertResult.file);
+			}
 
 			if (item.parent_id) {
 				pendingParents.push({ childTodoistId: item.id, parentTodoistId: item.parent_id });
@@ -308,7 +313,7 @@ export class TaskNoteRepository {
 		// after all the creates/renames/updates performed in this method.
 		this.vaultIndex?.invalidate();
 
-		return { created, updated };
+		return { created, updated, newlyCreatedFiles };
 	}
 
 	/**
