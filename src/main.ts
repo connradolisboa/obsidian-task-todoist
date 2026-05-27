@@ -14,7 +14,7 @@ import { createLocalTaskNote, type LocalTaskNoteInput } from './task-note-factor
 import { registerInlineTaskConverter } from './inline-task-converter';
 import { createTaskConvertOverlayExtension } from './editor-task-convert-overlay';
 import { formatDueForDisplay, parseInlineTaskDirectives } from './task-directives';
-import { applyStandardTaskFrontmatter, getPropNames, setTaskStatus, touchModifiedDate } from './task-frontmatter';
+import { applyStandardTaskFrontmatter, getPropNames, processTaskFrontmatter, setTaskStatus, touchModifiedDate } from './task-frontmatter';
 import { resolveTemplateVars } from './template-variables';
 import { VaultIndex } from './vault-index';
 
@@ -293,7 +293,7 @@ export default class TaskTodoistPlugin extends Plugin {
 				order: noteTaskOrder,
 			});
 
-			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			await processTaskFrontmatter(this.app, file, (frontmatter) => {
 				(frontmatter as Record<string, unknown>)[p.todoistNoteTaskId] = taskId;
 			});
 
@@ -372,7 +372,7 @@ export default class TaskTodoistPlugin extends Plugin {
 				}
 			}
 
-			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			await processTaskFrontmatter(this.app, file, (frontmatter) => {
 				const f = frontmatter as Record<string, unknown>;
 				f[p.todoistProjectId] = projectId;
 				f[p.todoistProjectName] = projectName;
@@ -478,7 +478,7 @@ export default class TaskTodoistPlugin extends Plugin {
 		}
 
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(taskFile, (frontmatter) => {
+		await processTaskFrontmatter(this.app, taskFile, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			touchModifiedDate(data, this.settings);
@@ -746,7 +746,7 @@ export default class TaskTodoistPlugin extends Plugin {
 
 		this.statusSyncBusy.add(file.path);
 		try {
-			await this.app.fileManager.processFrontMatter(file, (fm) => {
+			await processTaskFrontmatter(this.app, file, (fm) => {
 				const data = fm as Record<string, unknown>;
 				if (newDone !== null) data[p.taskDone] = newDone;
 				if (newStatus !== null) data[p.taskStatus] = newStatus;
@@ -804,7 +804,7 @@ export default class TaskTodoistPlugin extends Plugin {
 			return;
 		}
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatterToMutate) => {
+		await processTaskFrontmatter(this.app, file, (frontmatterToMutate) => {
 			const data = frontmatterToMutate as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			touchModifiedDate(data, this.settings);

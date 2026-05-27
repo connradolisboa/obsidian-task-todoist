@@ -1,8 +1,59 @@
+import type { App, TFile } from 'obsidian';
 import type { PropNames, TaskTodoistSettings } from './settings';
+import { CRITICAL_PROP_KEYS, disabledPropKey, isDisabledPropName } from './settings';
 import { resolveTemplateVars } from './template-variables';
 
+/**
+ * Returns the effective property names map. For any key the user has marked
+ * disabled (and that isn't critical), the returned name is a sentinel like
+ * `__disabled_<key>__`. Writes to that sentinel are stripped before the YAML
+ * is persisted; reads return undefined.
+ */
 export function getPropNames(settings: TaskTodoistSettings): PropNames {
-	return settings.propNames;
+	const disabled = settings.disabledPropNames;
+	if (!disabled || disabled.length === 0) {
+		return settings.propNames;
+	}
+	const remapped: PropNames = { ...settings.propNames };
+	for (const key of disabled) {
+		if (CRITICAL_PROP_KEYS.has(key)) continue;
+		remapped[key] = disabledPropKey(key);
+	}
+	return remapped;
+}
+
+/**
+ * Strip any frontmatter keys that were written via a disabled-prop sentinel.
+ * Must be called inside every processFrontMatter callback before it returns,
+ * so the sentinel keys never reach the YAML on disk.
+ */
+export function stripDisabledPropKeys(frontmatter: Record<string, unknown>): void {
+	for (const key of Object.keys(frontmatter)) {
+		if (isDisabledPropName(key)) {
+			delete frontmatter[key];
+		}
+	}
+}
+
+/**
+ * Drop-in replacement for `app.fileManager.processFrontMatter` that strips
+ * disabled-property sentinel keys after the user callback runs. Use this
+ * everywhere instead of calling `processFrontMatter` directly so that
+ * disabled properties never leak into the YAML on disk.
+ *
+ * The callback receives the raw frontmatter (typed `any` to match Obsidian's
+ * own signature); call sites cast to a stricter shape as they already did.
+ */
+export function processTaskFrontmatter(
+	app: App,
+	file: TFile,
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	callback: (frontmatter: any) => void,
+): Promise<void> {
+	return app.fileManager.processFrontMatter(file, (frontmatter) => {
+		callback(frontmatter);
+		stripDisabledPropKeys(frontmatter as Record<string, unknown>);
+	});
 }
 
 export function applyStandardTaskFrontmatter(

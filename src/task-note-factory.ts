@@ -1,7 +1,7 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import type { TaskTodoistSettings } from './settings';
 import type { TodoistProject } from './todoist-client';
-import { formatCreatedDate, formatModifiedDate, generateUuid, getDefaultTaskTag, getPropNames, priorityLabel } from './task-frontmatter';
+import { formatCreatedDate, formatModifiedDate, generateUuid, getDefaultTaskTag, getPropNames, priorityLabel, processTaskFrontmatter } from './task-frontmatter';
 import { resolveTemplateVars, TaskTemplateContext } from './template-variables';
 import { buildRecurrenceString } from './todoist-rrule';
 
@@ -76,7 +76,7 @@ export async function createLocalTaskNote(
 		// Hydrate all required frontmatter properties. The template provides layout/body
 		// structure; hydration ensures all properties are set even if the template only
 		// listed property names with empty values (or omitted them entirely).
-		await app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			// vault_id: always generate a fresh UUID for each new note
 			data[p.vaultId] = generateUuid();
@@ -155,6 +155,9 @@ export async function createLocalTaskNote(
 		'',
 	]
 		.filter((line): line is string => line !== null)
+		// Drop lines for properties the user has disabled (their key was remapped
+		// to the __disabled_<key>__ sentinel by getPropNames).
+		.filter((line) => !line.startsWith('__disabled_'))
 		.join('\n');
 
 	return app.vault.create(filePath, frontmatter);

@@ -13,6 +13,7 @@ import {
 	getTaskTitle,
 	getPropNames,
 	priorityLabel,
+	processTaskFrontmatter,
 	setTaskStatus,
 	setTaskTitle,
 	touchModifiedDate,
@@ -347,7 +348,7 @@ export class TaskNoteRepository {
 		if (!nameChanged && !colorChanged) return;
 
 		// Update using configurable property names
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			if (nameChanged) frontmatter[p.todoistProjectName] = projectName;
 			if (colorChanged) frontmatter[p.todoistProjectColor] = projectColor ?? null;
 		});
@@ -643,7 +644,7 @@ export class TaskNoteRepository {
 				`${p.tags}: []`,
 				'---',
 				'',
-			].join('\n');
+			].filter((line) => !line.startsWith('__disabled_')).join('\n');
 		}
 		let file: TFile;
 		try {
@@ -660,7 +661,7 @@ export class TaskNoteRepository {
 		// Always hydrate required frontmatter after creation. When a template is used, the
 		// template may omit IDs or use different property names — hydration guarantees the
 		// vault index can always find this note and rename detection works correctly.
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			if (!data[p.vaultId]) data[p.vaultId] = generateUuid();
 			// Always set IDs — these are critical for vault indexing
@@ -677,7 +678,7 @@ export class TaskNoteRepository {
 		// When createProjectTasks is enabled, mark this new project note as pending task creation.
 		// The empty string signals listPendingProjectTaskCreates() to create a Todoist task on next sync.
 		if (this.settings.createProjectTasks) {
-			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			await processTaskFrontmatter(this.app, file, (frontmatter) => {
 				const data = frontmatter as Record<string, unknown>;
 				if (!(p.todoistProjectTaskId in data)) {
 					data[p.todoistProjectTaskId] = '';
@@ -709,7 +710,7 @@ export class TaskNoteRepository {
 
 		if (!sectionNameStale && !projectLinkStale) return;
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			if (sectionNameStale) frontmatter[p.todoistSectionName] = sectionName;
 			if (projectLinkStale) frontmatter[p.todoistProjectLink] = currentProjectLink;
 		});
@@ -838,7 +839,7 @@ export class TaskNoteRepository {
 				`${p.tags}: []`,
 				'---',
 				'',
-			].join('\n');
+			].filter((line) => !line.startsWith('__disabled_')).join('\n');
 		}
 		let file: TFile;
 		try {
@@ -855,7 +856,7 @@ export class TaskNoteRepository {
 		// Always hydrate required frontmatter after creation. When a template is used, the
 		// template may omit IDs or use different property names — hydration guarantees the
 		// vault index can always find this note and links are set correctly.
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			if (!data[p.vaultId]) data[p.vaultId] = generateUuid();
 			// Always set IDs and link — critical for vault indexing and task→section linking
@@ -936,7 +937,7 @@ export class TaskNoteRepository {
 					if (currentSyncStatus === targetStatus && !cachedFrontmatter?.[p.todoistId]) {
 						continue;
 					}
-					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+					await processTaskFrontmatter(this.app, entry.file, (frontmatter) => {
 						const data = frontmatter as Record<string, unknown>;
 						applyStandardTaskFrontmatter(data, this.settings);
 						data[p.todoistSyncStatus] = targetStatus;
@@ -957,7 +958,7 @@ export class TaskNoteRepository {
 				}
 
 				if (needsFrontmatterUpdate) {
-					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+					await processTaskFrontmatter(this.app, entry.file, (frontmatter) => {
 						const data = frontmatter as Record<string, unknown>;
 						applyStandardTaskFrontmatter(data, this.settings);
 						data[p.todoistSyncStatus] = targetStatus;
@@ -991,7 +992,7 @@ export class TaskNoteRepository {
 				}
 
 				if (needsFrontmatterUpdate) {
-					await this.app.fileManager.processFrontMatter(entry.file, (frontmatter) => {
+					await processTaskFrontmatter(this.app, entry.file, (frontmatter) => {
 						const data = frontmatter as Record<string, unknown>;
 						applyStandardTaskFrontmatter(data, this.settings);
 						setTaskStatus(data, 'done', this.settings);
@@ -1421,7 +1422,7 @@ export class TaskNoteRepository {
 
 	async markLocalCreateSynced(file: TFile, todoistId: string, syncSignature: string): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			data[p.todoistId] = todoistId;
@@ -1440,7 +1441,7 @@ export class TaskNoteRepository {
 
 	async markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistPendingId] = pendingTodoistId;
 		});
 	}
@@ -1482,7 +1483,7 @@ export class TaskNoteRepository {
 	async markProjectTaskCreated(file: TFile, taskId: string): Promise<void> {
 		const p = getPropNames(this.settings);
 		const todoistUrl = buildTodoistUrl(taskId, this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			// Track the project task ID for the createProjectTasks feature
 			data[p.todoistProjectTaskId] = taskId;
@@ -1599,7 +1600,7 @@ export class TaskNoteRepository {
 	 */
 	async markNoteTaskCreated(file: TFile, taskId: string): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskId] = taskId;
 		});
 	}
@@ -1728,7 +1729,7 @@ export class TaskNoteRepository {
 			return;
 		}
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'deleted_remote';
 		});
 	}
@@ -1750,7 +1751,7 @@ export class TaskNoteRepository {
 			return;
 		}
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'stopped';
 		});
 	}
@@ -1761,7 +1762,7 @@ export class TaskNoteRepository {
 	 */
 	async markNoteTaskSyncedAt(file: TFile): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistNoteTaskSyncedAt] = formatSyncTimestamp(new Date());
 		});
 	}
@@ -1781,7 +1782,7 @@ export class TaskNoteRepository {
 		const p = getPropNames(this.settings);
 		const now = formatModifiedDate(new Date());
 		const syncNow = formatSyncTimestamp(new Date());
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const fm = frontmatter as Record<string, unknown>;
 			fm[p.todoistDue] = remoteDue ?? '';
 			fm[p.todoistDueString] = remoteDueString ?? '';
@@ -1905,7 +1906,7 @@ export class TaskNoteRepository {
 					? frontmatter[p.todoistLastSyncedSignature] as string
 					: '';
 			if (syncStatus === 'dirty_local' && lastSyncedSignature === signature) {
-				await this.app.fileManager.processFrontMatter(file, (dirtyFrontmatter) => {
+				await processTaskFrontmatter(this.app, file, (dirtyFrontmatter) => {
 					const data = dirtyFrontmatter as Record<string, unknown>;
 					applyStandardTaskFrontmatter(data, this.settings);
 					data[p.todoistSyncStatus] = 'synced';
@@ -1947,7 +1948,7 @@ export class TaskNoteRepository {
 
 	async markLocalUpdateSynced(file: TFile, syncSignature: string): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings);
 			data[p.todoistSyncStatus] = 'synced';
@@ -1961,7 +1962,7 @@ export class TaskNoteRepository {
 
 	async recordRecurringCompletion(file: TFile, completedDate: string): Promise<void> {
 		const p = getPropNames(this.settings);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			const existing = Array.isArray(data[p.completeInstances])
 				? (data[p.completeInstances] as unknown[]).filter((x): x is string => typeof x === 'string')
@@ -2067,7 +2068,7 @@ export class TaskNoteRepository {
 			duration: durationMinutes ?? undefined,
 		});
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 
 			// vault_id: always generate fresh UUID for each new note
@@ -2165,7 +2166,7 @@ export class TaskNoteRepository {
 				? cachedFrontmatter[p.todoistSectionLink] as string
 				: '';
 			if (projectLink !== cachedProjectLink || sectionLink !== cachedSectionLink) {
-				await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				await processTaskFrontmatter(this.app, file, (frontmatter) => {
 					const data = frontmatter as Record<string, unknown>;
 					data[p.todoistProjectLink] = projectLink;
 					data[p.todoistSectionLink] = sectionLink;
@@ -2197,7 +2198,7 @@ export class TaskNoteRepository {
 			? buildRecurrenceString(item.due.string, dueDate)
 			: null;
 
-		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings, { skipDefaultTag: isDualPurpose });
 
@@ -2341,7 +2342,7 @@ export class TaskNoteRepository {
 				continue;
 			}
 
-			await this.app.fileManager.processFrontMatter(childFile, (frontmatter) => {
+			await processTaskFrontmatter(this.app, childFile, (frontmatter) => {
 				const data = frontmatter as Record<string, unknown>;
 				applyStandardTaskFrontmatter(data, this.settings);
 				touchModifiedDate(data, this.settings);
@@ -2412,7 +2413,7 @@ export class TaskNoteRepository {
 				continue;
 			}
 
-			await this.app.fileManager.processFrontMatter(file, (rawFrontmatter) => {
+			await processTaskFrontmatter(this.app, file, (rawFrontmatter) => {
 				const data = rawFrontmatter as Record<string, unknown>;
 				applyStandardTaskFrontmatter(data, this.settings);
 				touchModifiedDate(data, this.settings);
@@ -2446,7 +2447,7 @@ export class TaskNoteRepository {
 			if (existingLink === parentLink && existingName === parentName) {
 				continue;
 			}
-			await this.app.fileManager.processFrontMatter(projectFile, (fm) => {
+			await processTaskFrontmatter(this.app, projectFile, (fm) => {
 				(fm as Record<string, unknown>)[p.todoistParentProjectLink] = parentLink;
 				(fm as Record<string, unknown>)[p.todoistParentProjectName] = parentName;
 			});
@@ -2495,7 +2496,7 @@ export class TaskNoteRepository {
 				continue;
 			}
 
-			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+			await processTaskFrontmatter(this.app, file, (frontmatter) => {
 				(frontmatter as Record<string, unknown>)[p.vaultId] = generateUuid();
 			});
 			backfilled += 1;
@@ -2530,7 +2531,7 @@ export class TaskNoteRepository {
 				console.warn(
 					`[obsidian-task-todoist] Duplicate todoist_id ${id}: keeping "${keeper.path}", clearing from "${dupe.path}"`,
 				);
-				await this.app.fileManager.processFrontMatter(dupe, (fm) => {
+				await processTaskFrontmatter(this.app, dupe, (fm) => {
 					delete fm[p.todoistId];
 				});
 				resolved++;
@@ -2832,7 +2833,9 @@ function buildNewFileContent(
 		'---',
 		'',
 	];
-	return yaml.join('\n');
+	// Drop lines for properties the user has disabled (their key was remapped
+	// to the __disabled_<key>__ sentinel by getPropNames).
+	return yaml.filter((line) => !line.startsWith('__disabled_')).join('\n');
 }
 
 function toWikiLink(filePath: string): string {

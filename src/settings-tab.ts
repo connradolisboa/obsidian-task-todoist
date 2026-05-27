@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, SecretComponent, Setting } from 'obsidian';
 import { notify } from './notify';
 import type TaskTodoistPlugin from './main';
-import { DEFAULT_PROP_NAMES } from './settings';
+import { CRITICAL_PROP_KEYS, DEFAULT_PROP_NAMES } from './settings';
 import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
 
 type TabId = 'general' | 'import' | 'sync' | 'notes' | 'notetask' | 'dailylog' | 'properties';
@@ -1062,6 +1062,12 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		});
 		desc.style.marginBottom = '0.5em';
 
+		const excludeDesc = el.createEl('p', {
+			text: 'Toggle the switch next to a property to exclude it from syncing — disabled properties are never written to frontmatter. Sync-critical properties (task title/status, IDs, signatures, etc.) cannot be excluded. Already-written values on existing notes are left in place.',
+			cls: 'setting-item-description',
+		});
+		excludeDesc.style.marginBottom = '0.5em';
+
 		new Setting(el).setName('Core task properties').setHeading();
 
 		this.addPropNameSetting(el, 'Created date', 'Property storing the note creation date.', 'created');
@@ -1146,9 +1152,13 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 		key: keyof PropNames,
 	): void {
 		const defaultValue = DEFAULT_PROP_NAMES[key];
-		new Setting(containerEl)
+		const isCritical = CRITICAL_PROP_KEYS.has(key);
+		const descSuffix = isCritical
+			? ' This property is required for sync correctness and cannot be excluded.'
+			: '';
+		const setting = new Setting(containerEl)
 			.setName(name)
-			.setDesc(`${desc} Default: "${defaultValue}"`)
+			.setDesc(`${desc} Default: "${defaultValue}".${descSuffix}`)
 			.addText((text) => {
 				text
 					.setPlaceholder(defaultValue)
@@ -1160,5 +1170,25 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					});
 				text.inputEl.size = 28;
 			});
+
+		if (!isCritical) {
+			setting.addToggle((toggle) => {
+				toggle.toggleEl.setAttr('aria-label', 'Exclude this property from syncing');
+				toggle.toggleEl.title = 'Exclude this property from syncing';
+				const isDisabled = this.plugin.settings.disabledPropNames.includes(key);
+				toggle
+					.setValue(isDisabled)
+					.onChange(async (value) => {
+						const list = this.plugin.settings.disabledPropNames;
+						const idx = list.indexOf(key);
+						if (value && idx === -1) {
+							list.push(key);
+						} else if (!value && idx !== -1) {
+							list.splice(idx, 1);
+						}
+						await this.plugin.saveSettings();
+					});
+			});
+		}
 	}
 }

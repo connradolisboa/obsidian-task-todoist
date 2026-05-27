@@ -69,6 +69,43 @@ export interface PropNames {
 	completedAt: string;
 }
 
+/**
+ * Property keys that are load-bearing for sync correctness. These must never be
+ * disabled via the "exclude from sync" UI — disabling them would break remote
+ * mapping, change detection, idempotency, or core task state.
+ */
+export const CRITICAL_PROP_KEYS: ReadonlySet<keyof PropNames> = new Set<keyof PropNames>([
+	'taskTitle',
+	'taskStatus',
+	'taskDone',
+	'todoistSync',
+	'todoistSyncStatus',
+	'todoistId',
+	'todoistPendingId',
+	'todoistLastImportedSignature',
+	'todoistLastSyncedSignature',
+	'vaultId',
+	'todoistIsDeleted',
+	'todoistNoteTaskId',
+	'todoistProjectTaskId',
+]);
+
+/**
+ * Sentinel prefix used in PropNames when a property is disabled. Writes go to
+ * `__disabled_<key>__`; the processFrontMatter wrapper strips any key with this
+ * prefix before the YAML is persisted.
+ */
+export const DISABLED_PROP_PREFIX = '__disabled_';
+export const DISABLED_PROP_SUFFIX = '__';
+
+export function disabledPropKey(key: keyof PropNames): string {
+	return `${DISABLED_PROP_PREFIX}${key}${DISABLED_PROP_SUFFIX}`;
+}
+
+export function isDisabledPropName(name: string): boolean {
+	return name.startsWith(DISABLED_PROP_PREFIX) && name.endsWith(DISABLED_PROP_SUFFIX);
+}
+
 export const DEFAULT_PROP_NAMES: PropNames = {
 	taskTitle: 'task_title',
 	taskStatus: 'task_status',
@@ -139,6 +176,10 @@ export interface TaskTodoistSettings {
 	todoistTokenSecretName: string;
 	// New settings
 	propNames: PropNames;
+	// Property keys (from PropNames) that the user has excluded from syncing.
+	// Disabled properties are never written to frontmatter; reads return undefined.
+	// Critical sync properties (see CRITICAL_PROP_KEYS) cannot be disabled.
+	disabledPropNames: (keyof PropNames)[];
 	useProjectSubfolders: boolean;
 	useSectionSubfolders: boolean;
 	todoistLinkStyle: TodoistLinkStyle;
@@ -221,6 +262,7 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	autoImportAssignedToMeOnly: true,
 	todoistTokenSecretName: DEFAULT_TODOIST_TOKEN_SECRET_NAME,
 	propNames: { ...DEFAULT_PROP_NAMES },
+	disabledPropNames: [],
 	useProjectSubfolders: false,
 	useSectionSubfolders: false,
 	todoistLinkStyle: 'web',
