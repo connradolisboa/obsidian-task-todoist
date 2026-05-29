@@ -166,6 +166,12 @@ export interface TaskTodoistSettings {
 	completedFolderPath: string;
 	deletedTaskMode: DeletedTaskMode;
 	deletedFolderPath: string;
+	// Safety cap: if a single sync would delete more than this many task notes
+	// (deletedTaskMode === 'delete'), the delete phase aborts. Guards against a
+	// transient API blip that returns an empty task list. 0 disables the cap.
+	maxDeletesPerSync: number;
+	// Set true once the user has acknowledged the destructive-delete warning modal.
+	deletedModeConfirmed: boolean;
 	autoImportEnabled: boolean;
 	autoImportProjectScope: ImportProjectScope;
 	autoImportAllowedProjectNames: string;
@@ -253,6 +259,8 @@ export const DEFAULT_SETTINGS: TaskTodoistSettings = {
 	completedFolderPath: 'Tasks/_archive',
 	deletedTaskMode: 'keep-in-place',
 	deletedFolderPath: 'Tasks/_archive',
+	maxDeletesPerSync: 25,
+	deletedModeConfirmed: false,
 	autoImportEnabled: true,
 	autoImportProjectScope: 'allow-list-by-name',
 	autoImportAllowedProjectNames: '',

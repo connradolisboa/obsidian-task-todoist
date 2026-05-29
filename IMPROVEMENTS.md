@@ -10,43 +10,43 @@ A prioritized, checkbox-driven roadmap for hardening, refining, and extending th
 
 These are concrete defects in the current code. Each risks duplicate Todoist tasks, silent data loss, or frontmatter clobbering. Ship as a patch release.
 
-- [ ] **Persist `todoist_pending_id` BEFORE `createTask()`, not after**
+- [x] **Persist `todoist_pending_id` BEFORE `createTask()`, not after**
   - **Where:** [src/sync-service.ts:109-111](src/sync-service.ts#L109-L111)
   - **How:** Generate a UUID locally, write it as `todoist_pending_id` into the note frontmatter, *then* call `createTask()`. On the next sync, any note with a pending ID is reconciled against Todoist (by `temp_id` / title / created-at) instead of re-created. Apply the same ordering to project-task creation ([sync-service.ts:350-361](src/sync-service.ts#L350-L361)) and NoteTask creation ([sync-service.ts:413-523](src/sync-service.ts#L413-L523)).
 
-- [ ] **Add a write-ahead log for pending creates**
+- [x] **Add a write-ahead log for pending creates**
   - **Where:** new file `src/pending-log.ts`; called from `sync-service.ts`
   - **How:** Single JSON file under `.obsidian/plugins/<id>/pending.json` tracking `{ noteVaultId, kind: 'task'|'project'|'noteTask', dispatchedAt, todoistId? }`. Written before the network call, cleared on confirmation. Survives crashes that beat frontmatter writes to disk.
 
-- [ ] **Stop clobbering `todoistProjectLink/SectionLink/Labels` in `local-wins` conflicts**
+- [x] **Stop clobbering `todoistProjectLink/SectionLink/Labels` in `local-wins` conflicts**
   - **Where:** [src/task-note-repository.ts:2210-2213](src/task-note-repository.ts#L2210-L2213) (inside `updateTaskFile()`)
   - **How:** When `syncStatus === 'dirty_local'` and `conflictResolution === 'local-wins'`, treat link/label frontmatter as user-editable too — skip writes unless the value is genuinely missing. Better: store a `lastSyncedSnapshot` blob in frontmatter and do a 3-way merge (local vs remote vs base).
 
-- [ ] **Reuse command UUIDs across 429 retries**
+- [x] **Reuse command UUIDs across 429 retries**
   - **Where:** [src/todoist-client.ts:339-412](src/todoist-client.ts#L339-L412) (`syncWithCommands`)
   - **How:** Verify that the UUID generated per command is created once at the call site and *not* regenerated inside the retry loop. The Sync API dedupes by UUID; regenerating per attempt causes duplicate updates on rate-limit retries.
 
-- [ ] **Surface exhausted-retry errors instead of returning empty results**
+- [x] **Surface exhausted-retry errors instead of returning empty results**
   - **Where:** [src/todoist-client.ts:180-202](src/todoist-client.ts#L180-L202) (`fetchRecentlyDeletedTaskIds`)
   - **How:** Change return type to `{ ok: true; ids: Set<string> } | { ok: false; reason: string }`. Caller in `sync-service.ts` skips the deletion phase when `ok: false` and logs to phase errors. Today, exhausted retries silently look like "nothing was deleted" and tasks deleted in Todoist stay in Obsidian forever.
 
-- [ ] **Save `lastSyncToken` only on clean snapshot phase**
+- [x] **Save `lastSyncToken` only on clean snapshot phase**
   - **Where:** [src/sync-service.ts:173-179](src/sync-service.ts#L173-L179)
   - **How:** Track per-phase success; persist `lastSyncToken` only when the snapshot phase has no errors. Currently a token saved after a partial failure causes the next sync to miss changes silently.
 
-- [ ] **Re-check file mtime before per-file writes during Phase 7 upsert**
+- [x] **Re-check file mtime before per-file writes during Phase 7 upsert**
   - **Where:** [src/sync-service.ts:237-248](src/sync-service.ts#L237-L248) → `updateTaskFile()` in `task-note-repository.ts`
   - **How:** Before writing, compare `file.stat.mtime` to the value captured when the file was indexed at sync start. If it changed, mark `syncStatus: 'dirty_local'` and skip the remote-wins write. Today a long sync can clobber edits the user made while it ran.
 
-- [ ] **Sync lock: acknowledge every manual trigger**
+- [x] **Sync lock: acknowledge every manual trigger**
   - **Where:** [src/main.ts:155-202](src/main.ts#L155-L202)
   - **How:** Replace single boolean queue flag with a counter and a Notice on each trigger ("Sync already running — queued"). Coalesce >1 pending into a single re-run, but every user click should yield user-visible feedback.
 
-- [ ] **Confirmation modal + max-deletion cap for destructive `deletedTaskMode: 'delete'`**
+- [x] **Confirmation modal + max-deletion cap for destructive `deletedTaskMode: 'delete'`**
   - **Where:** [src/settings-tab.ts](src/settings-tab.ts) (mode selector) + [src/task-note-repository.ts:969-980](src/task-note-repository.ts#L969-L980) (`applyMissingRemoteTasks`)
   - **How:** First time a user picks `delete`, show a modal explaining the risk and requiring "I understand". Add `maxDeletesPerSync` setting (default 25); if exceeded, abort the delete phase and surface a Notice. Protects against a transient API blip that returns an empty task list.
 
-- [ ] **NoteTask orphan cleanup on 404**
+- [x] **NoteTask orphan cleanup on 404**
   - **Where:** [src/sync-service.ts:457-460](src/sync-service.ts#L457-L460) (NoteTask "stop" path) and reconciliation in same file
   - **How:** When pushing an update for a NoteTask returns 404, clear `todoistNoteTaskId` and either re-create or mark the note for user review. Today a failed delete leaves the frontmatter pointing at a vanished task and every future sync silently no-ops.
 
@@ -56,19 +56,19 @@ These are concrete defects in the current code. Each risks duplicate Todoist tas
 
 The plugin is O(n) over the entire vault on every sync. Large vaults (5K+ notes) hit a wall.
 
-- [ ] **Event-driven vault index**
+- [x] **Event-driven vault index**
   - **Where:** [src/vault-index.ts](src/vault-index.ts) (expand) + [src/task-note-repository.ts:172](src/task-note-repository.ts#L172) (`buildVaultIndexes`)
   - **How:** Subscribe to `vault.on('create'|'modify'|'delete'|'rename')` and maintain indexes incrementally. Rebuild only on plugin load. Removes per-sync filesystem scans.
 
-- [ ] **Lazy project/section pre-pass**
+- [x] **Lazy project/section pre-pass**
   - **Where:** [src/task-note-repository.ts:190-229](src/task-note-repository.ts#L190-L229)
   - **How:** Only ensure project/section notes that are touched by the current item set, not all 500 projects up front. Tracks orphan project notes separately for archival.
 
-- [ ] **Cache duplicate-resolution state**
+- [x] **Cache duplicate-resolution state**
   - **Where:** [src/task-note-repository.ts:172-173](src/task-note-repository.ts#L172-L173) (`autoResolveDuplicateIds`)
   - **How:** Skip the full scan when no writes have occurred since last check. Cache "clean" state in memory and invalidate via the vault event subscription above.
 
-- [ ] **Investigate Todoist Sync API instead of REST polling**
+- [x] **Investigate Todoist Sync API instead of REST polling**
   - **Where:** [src/todoist-client.ts](src/todoist-client.ts) (whole client)
   - **How:** Sync API returns only items changed since a `sync_token`, dramatically reducing payload size and request count. Trade-off: more state to manage (token persistence, full-resync recovery). Spike before committing.
 

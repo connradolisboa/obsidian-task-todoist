@@ -3,6 +3,7 @@ import { notify } from './notify';
 import type TaskTodoistPlugin from './main';
 import { CRITICAL_PROP_KEYS, DEFAULT_PROP_NAMES } from './settings';
 import type { CompletedTaskMode, DeletedTaskMode, ConflictResolution, ImportProjectScope, PropNames, TodoistLinkStyle } from './settings';
+import { ConfirmDeleteModeModal } from './confirm-delete-modal';
 
 type TabId = 'general' | 'import' | 'sync' | 'notes' | 'notetask' | 'dailylog' | 'properties';
 
@@ -493,9 +494,40 @@ export class TaskTodoistSettingTab extends PluginSettingTab {
 					.addOption('delete', 'Delete note file')
 					.setValue(this.plugin.settings.deletedTaskMode)
 					.onChange(async (value) => {
-						this.plugin.settings.deletedTaskMode = value as DeletedTaskMode;
+						const mode = value as DeletedTaskMode;
+						// First time picking the destructive "delete" mode: require an
+						// explicit acknowledgement before committing the setting.
+						if (mode === 'delete' && !this.plugin.settings.deletedModeConfirmed) {
+							new ConfirmDeleteModeModal(this.app, async (confirmed) => {
+								if (confirmed) {
+									this.plugin.settings.deletedTaskMode = 'delete';
+									this.plugin.settings.deletedModeConfirmed = true;
+									await this.plugin.saveSettings();
+								} else {
+									// Revert the dropdown to the previous value.
+									dropdown.setValue(this.plugin.settings.deletedTaskMode);
+								}
+							}).open();
+							return;
+						}
+						this.plugin.settings.deletedTaskMode = mode;
 						await this.plugin.saveSettings();
 					});
+			});
+
+		new Setting(el)
+			.setName('Max deletes per sync')
+			.setDesc('Safety cap for "Delete note file" mode. If a single sync would delete more than this many notes, the delete phase aborts and you are notified — protecting against a transient Todoist outage. Set to 0 to disable.')
+			.addText((text) => {
+				text
+					.setPlaceholder('25')
+					.setValue(String(this.plugin.settings.maxDeletesPerSync))
+					.onChange(async (value) => {
+						const n = Number(value.trim());
+						this.plugin.settings.maxDeletesPerSync = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 25;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.size = 6;
 			});
 
 		new Setting(el)

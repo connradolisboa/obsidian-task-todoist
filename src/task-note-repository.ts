@@ -45,6 +45,8 @@ interface ProjectSectionMaps {
 	sectionFileById?: Map<string, TFile>;
 	allProjects?: TodoistProject[];
 	allSections?: TodoistSection[];
+	/** File mtimes captured at the very start of the sync run, keyed by path. Used to detect edits made while a long sync was running. */
+	fileMtimeAtStart?: Map<string, number>;
 }
 
 interface UpsertResult {
@@ -171,7 +173,7 @@ export class TaskNoteRepository {
 		await this.ensureFolderExists(resolvedFolder);
 
 		const { taskIndex: existingByTodoistId, projectIndex, sectionIndex, duplicateTaskFiles } = this.buildVaultIndexes();
-		await this.autoResolveDuplicateIds(duplicateTaskFiles, existingByTodoistId);
+		await this.resolveDuplicatesIfNeeded(duplicateTaskFiles, existingByTodoistId);
 		const createdOrUpdatedByTodoistId = new Map<string, TFile>();
 		const newlyCreatedFiles = new Map<string, TFile>(); // todoistId → TFile for daily note events
 		const pendingParents: ParentAssignment[] = [];
@@ -187,9 +189,31 @@ export class TaskNoteRepository {
 		const excludedProjectNames = parseCommaSeparatedNameSet(this.settings.excludedProjectNames);
 		const excludedSectionNames = parseCommaSeparatedNameSet(this.settings.excludedSectionNames);
 
-		// Pre-pass: ensure notes for ALL projects and sections (not just those with tasks)
+		// T2.2: Lazy pre-pass. Instead of ensuring notes for ALL projects/sections up
+		// front (O(all projects) on every sync — a wall for large accounts), only touch
+		// those referenced by the current item set or that already have a note in the
+		// vault. Ancestor projects are included so parent-project links still resolve.
+		const touchedProjectIds = new Set<string>();
+		for (const item of items) touchedProjectIds.add(item.project_id);
+		for (const id of projectIndex.keys()) touchedProjectIds.add(id);
+		if (maps.projectParentIdById) {
+			for (const id of Array.from(touchedProjectIds)) {
+				let parent = maps.projectParentIdById.get(id) ?? null;
+				const seen = new Set<string>();
+				while (parent && !seen.has(parent)) {
+					seen.add(parent);
+					touchedProjectIds.add(parent);
+					parent = maps.projectParentIdById.get(parent) ?? null;
+				}
+			}
+		}
+		const touchedSectionIds = new Set<string>();
+		for (const item of items) if (item.section_id) touchedSectionIds.add(item.section_id);
+		for (const id of sectionIndex.keys()) touchedSectionIds.add(id);
+
+		// Pre-pass: ensure notes for touched projects and sections.
 		if (this.settings.createProjectNotes && maps.allProjects) {
-			const sortedProjects = topologicalSortProjects(maps.allProjects);
+			const sortedProjects = topologicalSortProjects(maps.allProjects).filter((pr) => touchedProjectIds.has(pr.id));
 			for (const project of sortedProjects) {
 				if (!seenProjectIds.has(project.id) && !excludedProjectNames.has(project.name.toLowerCase())) {
 					seenProjectIds.add(project.id);
@@ -209,6 +233,7 @@ export class TaskNoteRepository {
 		}
 		if (this.settings.createSectionNotes && (this.settings.useProjectSubfolders || !!this.settings.sectionNotesFolderPath?.trim()) && maps.allSections) {
 			for (const section of maps.allSections) {
+				if (!touchedSectionIds.has(section.id)) continue;
 				if (!seenSectionIds.has(section.id) && !excludedSectionNames.has(section.name.toLowerCase())) {
 					seenSectionIds.add(section.id);
 					const projectName = maps.projectNameById.get(section.project_id) ?? 'Unknown';
@@ -900,11 +925,11 @@ export class TaskNoteRepository {
 
 	async listSyncedTasks(): Promise<SyncedTaskEntry[]> {
 		const { taskIndex, duplicateTaskFiles } = this.buildVaultIndexes();
-		await this.autoResolveDuplicateIds(duplicateTaskFiles, taskIndex);
+		await this.resolveDuplicatesIfNeeded(duplicateTaskFiles, taskIndex);
 		return Array.from(taskIndex.entries()).map(([todoistId, file]) => ({ todoistId, file }));
 	}
 
-	async applyMissingRemoteTasks(missingEntries: MissingTaskEntry[]): Promise<number> {
+	async applyMissingRemoteTasks(missingEntries: MissingTaskEntry[], phaseErrors?: string[]): Promise<number> {
 		let changed = 0;
 		const p = getPropNames(this.settings);
 		const { completedTaskMode, deletedTaskMode } = this.settings;
@@ -912,6 +937,22 @@ export class TaskNoteRepository {
 		const completedFolderPrefix = `${normalizePath(resolvedCompletedFolder)}/`;
 		const resolvedDeletedFolder = resolveTemplateVars(this.settings.deletedFolderPath);
 		const deletedFolderPrefix = `${normalizePath(resolvedDeletedFolder)}/`;
+
+		// Safety cap for destructive delete mode: if a single sync would delete more
+		// than maxDeletesPerSync notes, skip ALL file deletions this run. Guards
+		// against a transient API blip that returns an empty/short task list and would
+		// otherwise wipe large swaths of the vault. Completions are unaffected.
+		const deleteCap = this.settings.maxDeletesPerSync;
+		const pendingDeleteCount = deletedTaskMode === 'delete'
+			? missingEntries.filter((e) => e.isDeletedRemote).length
+			: 0;
+		const abortDeletes = deletedTaskMode === 'delete' && deleteCap > 0 && pendingDeleteCount > deleteCap;
+		if (abortDeletes) {
+			const msg = `Deletion aborted: ${pendingDeleteCount} notes would be deleted, exceeding the cap of ${deleteCap}. No notes were deleted — verify Todoist is reachable, then re-sync.`;
+			console.warn(`[obsidian-task-todoist] ${msg}`);
+			notify(this.settings, `Task Todoist: ${msg}`, 10000);
+			phaseErrors?.push(msg);
+		}
 
 		for (const entry of missingEntries) {
 			const cachedFrontmatter = this.app.metadataCache.getFileCache(entry.file)?.frontmatter as Record<string, unknown> | undefined;
@@ -926,6 +967,10 @@ export class TaskNoteRepository {
 				const targetStatus = 'deleted_remote';
 
 				if (deletedTaskMode === 'delete') {
+				if (abortDeletes) {
+					// Cap exceeded — leave the note untouched this run.
+					continue;
+				}
 				// Delete the file from vault
 				await this.app.vault.delete(entry.file);
 				changed += 1;
@@ -1439,11 +1484,102 @@ export class TaskNoteRepository {
 		});
 	}
 
-	async markCreateDispatched(file: TFile, pendingTodoistId: string): Promise<void> {
+	/**
+	 * Writes a locally-generated pending ID to the note's frontmatter. This MUST
+	 * be called BEFORE dispatching createTask() to Todoist. Once the pending ID is
+	 * present, listPendingLocalCreates() skips the note, so a crash mid-create can
+	 * never produce a duplicate Todoist task — reconcilePendingCreates() recovers
+	 * the note on the next sync (adopt the remote task by title, or clear the marker
+	 * to re-dispatch if the create never landed).
+	 */
+	async markCreatePending(file: TFile, pendingId: string): Promise<void> {
 		const p = getPropNames(this.settings);
 		await processTaskFrontmatter(this.app, file, (frontmatter) => {
-			(frontmatter as Record<string, unknown>)[p.todoistPendingId] = pendingTodoistId;
+			(frontmatter as Record<string, unknown>)[p.todoistPendingId] = pendingId;
 		});
+	}
+
+	/**
+	 * Reconciles notes left with a pending ID by a create that never confirmed
+	 * (crash between createTask() and markLocalCreateSynced()). For each such note:
+	 *   - if a matching, unmapped Todoist item exists → adopt its ID (no duplicate);
+	 *   - otherwise → clear the pending marker so the note is re-dispatched.
+	 * Pass the freshest snapshot items available before the create phase.
+	 */
+	async reconcilePendingCreates(items: TodoistItem[], fileMtimeAtStart?: Map<string, number>): Promise<{ adopted: number; recreated: number }> {
+		const p = getPropNames(this.settings);
+		const resolvedFolder = normalizePath(resolveTemplateVars(this.settings.tasksFolderPath));
+		const folderPrefix = `${resolvedFolder}/`;
+		const { taskIndex } = this.buildVaultIndexes();
+		const mappedIds = new Set(taskIndex.keys());
+		let adopted = 0;
+		let recreated = 0;
+
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			if (!(file.path === resolvedFolder || file.path.startsWith(folderPrefix))) {
+				continue;
+			}
+			const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) {
+				continue;
+			}
+			const pendingId = typeof fm[p.todoistPendingId] === 'string' ? (fm[p.todoistPendingId] as string).trim() : '';
+			if (!pendingId) {
+				continue;
+			}
+			const existingId =
+				typeof fm[p.todoistId] === 'string' ? (fm[p.todoistId] as string).trim() :
+				typeof fm[p.todoistId] === 'number' ? String(fm[p.todoistId]) :
+				'';
+			if (existingId) {
+				// Already has a real ID — just drop the stale pending marker.
+				await processTaskFrontmatter(this.app, file, (f) => { delete (f as Record<string, unknown>)[p.todoistPendingId]; });
+				fileMtimeAtStart?.set(file.path, file.stat.mtime);
+				continue;
+			}
+
+			const title = getTaskTitle(fm, this.settings, file.basename).trim();
+			const noteProjectId = toOptionalString(fm[p.todoistProjectId]);
+			const match = title
+				? items.find((item) =>
+					!item.is_deleted &&
+					!mappedIds.has(item.id) &&
+					stripObsidianNoteLink(item.content).trim() === title &&
+					(!noteProjectId || item.project_id === noteProjectId))
+				: undefined;
+
+			if (match) {
+				mappedIds.add(match.id);
+				const signature = buildTodoistSyncSignature({
+					title: stripObsidianNoteLink(match.content),
+					description: match.description?.trim() ?? '',
+					isDone: Boolean(match.checked),
+					isRecurring: Boolean(match.due?.is_recurring),
+					projectId: match.project_id,
+					sectionId: match.section_id ?? undefined,
+					dueDate: match.due?.date ?? '',
+					dueString: match.due?.string ?? '',
+					priority: match.priority ?? 1,
+					labels: match.labels ?? [],
+					deadline: match.deadline?.date ?? '',
+					duration: match.duration?.amount,
+				});
+				await this.markLocalCreateSynced(file, match.id, signature);
+				fileMtimeAtStart?.set(file.path, file.stat.mtime);
+				adopted += 1;
+			} else {
+				// The create never reached Todoist (or the task was deleted since).
+				// Clear the marker so listPendingLocalCreates() re-dispatches it.
+				await processTaskFrontmatter(this.app, file, (f) => { delete (f as Record<string, unknown>)[p.todoistPendingId]; });
+				fileMtimeAtStart?.set(file.path, file.stat.mtime);
+				recreated += 1;
+			}
+		}
+
+		if (adopted > 0 || recreated > 0) {
+			this.vaultIndex?.invalidate();
+		}
+		return { adopted, recreated };
 	}
 
 	/**
@@ -1753,6 +1889,21 @@ export class TaskNoteRepository {
 
 		await processTaskFrontmatter(this.app, file, (frontmatter) => {
 			(frontmatter as Record<string, unknown>)[p.todoistSyncStatus] = 'stopped';
+		});
+	}
+
+	/**
+	 * Clears the NoteTask link from a note whose Todoist task has vanished (404).
+	 * Removes todoist_note_task_id and todoist_note_task_synced_at so the note is
+	 * no longer pushed to a dead task. If the note still matches auto-create rules
+	 * it will be re-created on a later sync; otherwise it is left for user review.
+	 */
+	async clearNoteTaskLink(file: TFile): Promise<void> {
+		const p = getPropNames(this.settings);
+		await processTaskFrontmatter(this.app, file, (frontmatter) => {
+			const data = frontmatter as Record<string, unknown>;
+			delete data[p.todoistNoteTaskId];
+			delete data[p.todoistNoteTaskSyncedAt];
 		});
 	}
 
@@ -2182,6 +2333,14 @@ export class TaskNoteRepository {
 			: '';
 		const localWins = syncStatus === 'dirty_local' && this.settings.conflictResolution === 'local-wins';
 
+		// mtime guard: if the user edited this file after the sync run started, a
+		// long-running remote-wins import could clobber that edit. Detect it and
+		// treat the file as locally-changed — preserve user-editable fields and mark
+		// dirty_local so the edit is pushed on the next sync instead of being lost.
+		const capturedMtime = maps.fileMtimeAtStart?.get(file.path);
+		const userEditedDuringSync = typeof capturedMtime === 'number' && file.stat.mtime > capturedMtime;
+		const effectiveLocalWins = localWins || userEditedDuringSync;
+
 		const projectName = maps.projectNameById.get(item.project_id) ?? 'Unknown';
 		const sectionName = item.section_id ? (maps.sectionNameById.get(item.section_id) ?? '') : '';
 		const projectLink = maps.projectFileById?.get(item.project_id)
@@ -2202,20 +2361,26 @@ export class TaskNoteRepository {
 			const data = frontmatter as Record<string, unknown>;
 			applyStandardTaskFrontmatter(data, this.settings, { skipDefaultTag: isDualPurpose });
 
-			// Always write project/section metadata — these come from Todoist, not local edits.
+			// Always write the remote-authoritative identifiers — these are pure
+			// mapping data, never user-edited.
 			data[p.todoistSync] = true;
 			data[p.todoistId] = item.id;
 			data[p.todoistProjectId] = item.project_id;
 			data[p.todoistProjectName] = projectName;
 			data[p.todoistSectionId] = item.section_id ?? '';
 			data[p.todoistSectionName] = sectionName;
-			data[p.todoistProjectLink] = projectLink;
-			data[p.todoistSectionLink] = sectionLink;
-			data[p.todoistLabels] = item.labels ?? [];
 
-			// Merge label-tags: sync configured label names bidirectionally into note tags
+			// Project/section wikilinks and labels ARE user-editable. In local-wins
+			// mode, only populate them when genuinely missing so a remote-import does
+			// not clobber edits the user made before this sync pushed them.
+			if (!effectiveLocalWins || !(p.todoistProjectLink in data)) data[p.todoistProjectLink] = projectLink;
+			if (!effectiveLocalWins || !(p.todoistSectionLink in data)) data[p.todoistSectionLink] = sectionLink;
+			if (!effectiveLocalWins || !(p.todoistLabels in data)) data[p.todoistLabels] = item.labels ?? [];
+
+			// Merge label-tags: sync configured label names bidirectionally into note tags.
+			// Skip entirely in local-wins mode so the user's tag edits are preserved.
 			const labelTagSet = parseLabelTagSet(this.settings.labelTags);
-			if (labelTagSet.size > 0) {
+			if (!effectiveLocalWins && labelTagSet.size > 0) {
 				data[p.tags] = mergeLabelTagsIntoTags(data[p.tags], labelTagSet, item.labels ?? []);
 			}
 
@@ -2233,10 +2398,19 @@ export class TaskNoteRepository {
 			}
 			data[p.todoistLastImportedAt] = new Date().toISOString();
 
-			if (localWins) {
+			if (effectiveLocalWins) {
 				// Local wins: preserve user-editable fields (title, status, description, priority, due).
 				// Update the import signature so this partial metadata write is not re-applied every sync.
 				data[p.todoistLastImportedSignature] = remoteImportSignature;
+				// If the win was triggered by a concurrent edit (not a pre-existing
+				// dirty_local), mark the file dirty so the edit is pushed next sync.
+				if (userEditedDuringSync && syncStatus !== 'dirty_local') {
+					data[p.todoistSyncStatus] = 'dirty_local';
+					data[p.localUpdatedAt] = new Date().toISOString();
+					if (p.todoistSyncStatus !== 'sync_status' && 'sync_status' in data) {
+						delete data.sync_status;
+					}
+				}
 				return;
 			}
 
@@ -2502,6 +2676,23 @@ export class TaskNoteRepository {
 			backfilled += 1;
 		}
 		return backfilled;
+	}
+
+	/**
+	 * Runs duplicate-ID resolution unless the shared VaultIndex reports it has
+	 * already run against the current vault state (T2.3). The "clean" flag is
+	 * invalidated by any file event, so this still re-checks after real changes
+	 * while skipping the redundant second pass within a single sync run.
+	 */
+	private async resolveDuplicatesIfNeeded(
+		duplicateTaskFiles: Map<string, TFile[]>,
+		taskIndex: Map<string, TFile>,
+	): Promise<void> {
+		if (this.vaultIndex?.areDuplicatesResolved()) {
+			return;
+		}
+		await this.autoResolveDuplicateIds(duplicateTaskFiles, taskIndex);
+		this.vaultIndex?.markDuplicatesResolved();
 	}
 
 	private async autoResolveDuplicateIds(

@@ -34,7 +34,9 @@ export default class TaskTodoistPlugin extends Plugin {
 	private scheduledSyncIntervalId: number | null = null;
 	private syncLock: Promise<{ ok: boolean; message: string }> | null = null;
 	private vaultIndex: VaultIndex | null = null;
-	private syncQueued = false;
+	// Number of manual/scheduled triggers received while a sync was already running.
+	// Coalesced into a single re-run, but every trigger is acknowledged (T1.8).
+	private syncQueuedCount = 0;
 	private lastSyncToken: string | null = null;
 	private readonly statusSyncBusy = new Set<string>();
 	private readonly lastKnownTaskStatus = new Map<string, { taskDone: boolean | null; taskStatus: string | null }>();
@@ -154,8 +156,11 @@ export default class TaskTodoistPlugin extends Plugin {
 
 	async runImportSync(): Promise<{ ok: boolean; message: string; shortMessage?: string }> {
 		if (this.syncLock !== null) {
-			this.syncQueued = true;
-			return { ok: false, message: 'Sync already running. Queued another run.' };
+			// Coalesce: any number of triggers collapse into a single re-run, but each
+			// one is acknowledged so the user always gets feedback for their click.
+			this.syncQueuedCount += 1;
+			const msg = `Sync already running — queued (${this.syncQueuedCount} pending).`;
+			return { ok: false, message: msg, shortMessage: 'Sync already running — queued' };
 		}
 
 		const doSync = async (): Promise<{ ok: boolean; message: string }> => {
@@ -168,9 +173,11 @@ export default class TaskTodoistPlugin extends Plugin {
 			}
 
 			try {
-				const service = new SyncService(this.app, this.settings, token, this.lastSyncToken, this.vaultIndex);
+				const service = new SyncService(this.app, this.settings, token, this.lastSyncToken, this.vaultIndex, this.manifest.id);
 				const result = await service.runImportSync();
-				if (result.syncToken) {
+				// Persist the sync token only when the snapshot was fully applied; a token
+				// saved after a partial failure would make the next sync miss changes (T1.6).
+				if (result.syncToken && result.tokenSafe) {
 					this.lastSyncToken = result.syncToken;
 					try {
 						await this.saveSettings();
@@ -193,8 +200,8 @@ export default class TaskTodoistPlugin extends Plugin {
 			return await this.syncLock;
 		} finally {
 			this.syncLock = null;
-			if (this.syncQueued) {
-				this.syncQueued = false;
+			if (this.syncQueuedCount > 0) {
+				this.syncQueuedCount = 0;
 				void this.runImportSync().catch((err) => {
 					console.error('[TaskTodoist] Queued sync failed:', err);
 				});

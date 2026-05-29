@@ -60,6 +60,27 @@ export interface TodoistProjectSectionLookup {
 	sections: TodoistSection[];
 }
 
+/**
+ * Result of fetching recently-deleted task IDs. When `ok` is false the caller
+ * must NOT treat the absence of an ID as "not deleted" — the lookup itself
+ * failed, so deletion detection is unreliable for this sync run.
+ */
+export type DeletedIdsResult =
+	| { ok: true; ids: Set<string> }
+	| { ok: false; reason: string };
+
+/**
+ * Thrown when a Sync API command fails because the target item no longer
+ * exists in Todoist (HTTP 404 or an item-not-found error code). Callers can
+ * catch this to clean up frontmatter that points at a vanished task.
+ */
+export class TodoistNotFoundError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'TodoistNotFoundError';
+	}
+}
+
 export interface TodoistCreateTaskInput {
 	content: string;
 	description?: string;
@@ -177,7 +198,7 @@ export class TodoistClient {
 	 * Unlike the sync-token approach, this works across restarts and doesn't
 	 * require a previous sync token.
 	 */
-	async fetchRecentlyDeletedTaskIds(limit = 50): Promise<Set<string>> {
+	async fetchRecentlyDeletedTaskIds(limit = 50): Promise<DeletedIdsResult> {
 		const params = new URLSearchParams({
 			object_event_types: '["item:deleted"]',
 			count: String(limit),
@@ -190,7 +211,10 @@ export class TodoistClient {
 			throw: false,
 		}));
 		if (response.status !== 200) {
-			return new Set();
+			// Includes exhausted-retry 429s. Surface the failure so the caller can
+			// skip deletion handling rather than silently treating deleted tasks as
+			// "not deleted" (which would leave them orphaned in Obsidian forever).
+			return { ok: false, reason: `Todoist activities API returned status ${response.status}` };
 		}
 		const payload = response.json as TodoistActivitiesResponse;
 		const ids = new Set<string>();
@@ -198,7 +222,7 @@ export class TodoistClient {
 			const id = toId(event.object_id);
 			if (id) ids.add(id);
 		}
-		return ids;
+		return { ok: true, ids };
 	}
 
 	async fetchProjectSectionLookup(): Promise<TodoistProjectSectionLookup> {
@@ -218,6 +242,10 @@ export class TodoistClient {
 	}
 
 	async createTask(input: TodoistCreateTaskInput): Promise<string> {
+		// The command UUID and temp_id are generated ONCE here, outside the 429
+		// retry loop in syncWithBody(). The Sync API dedupes commands by UUID, so
+		// reusing the same UUID across retries guarantees a rate-limited create is
+		// never applied twice. Never move generation inside the retry loop.
 		const commandUuid = generateUuid();
 		const tempId = generateUuid();
 		const args: Record<string, unknown> = {
@@ -329,6 +357,9 @@ export class TodoistClient {
 		if (response.status === 401) {
 			throw new Error('Todoist authentication failed. Check your token.');
 		}
+		if (response.status === 404) {
+			throw new TodoistNotFoundError('Todoist delete task failed: item not found.');
+		}
 		if (response.status !== 200) {
 			throw new Error(`Todoist delete task failed with status ${response.status}.`);
 		}
@@ -392,6 +423,9 @@ export class TodoistClient {
 		const response = await this.syncWithCommands(commands);
 		if (response.status === 401) {
 			throw new Error('Todoist authentication failed. Check your token.');
+		}
+		if (response.status === 404) {
+			throw new TodoistNotFoundError('Todoist update task failed: item not found.');
 		}
 		if (response.status !== 200) {
 			throw new Error(`Todoist update task failed with status ${response.status}.`);
@@ -463,9 +497,32 @@ function generateUuid(): string {
 
 function assertSyncStatusOk(payload: TodoistSyncResponse, commandId: string, label: string): void {
 	const status = payload.sync_status?.[commandId];
-	if (status !== 'ok') {
-		throw new Error(`Todoist ${label} command failed.`);
+	if (status === 'ok') {
+		return;
 	}
+	if (isNotFoundStatus(status)) {
+		throw new TodoistNotFoundError(`Todoist ${label} command failed: item not found.`);
+	}
+	throw new Error(`Todoist ${label} command failed.`);
+}
+
+/** Detects a Sync API per-command error object that means the target item no longer exists. */
+function isNotFoundStatus(status: unknown): boolean {
+	if (!status || typeof status !== 'object') {
+		return false;
+	}
+	const s = status as { http_code?: unknown; error_code?: unknown; error?: unknown };
+	if (s.http_code === 404) {
+		return true;
+	}
+	// Todoist's item-not-found maps to error_code 22.
+	if (s.error_code === 22) {
+		return true;
+	}
+	if (typeof s.error === 'string' && /not\s*found|does(?:n'?t| not) exist/i.test(s.error)) {
+		return true;
+	}
+	return false;
 }
 
 function normalizeItems(rawItems: Array<Record<string, unknown>>): TodoistItem[] {

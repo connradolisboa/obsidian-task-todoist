@@ -2,12 +2,14 @@ import { TaskNoteRepository, type SyncedTaskEntry, type MissingTaskEntry, type A
 import type { TaskTodoistSettings } from './settings';
 import { getPropNames } from './task-frontmatter';
 import { filterImportableItems } from './import-rules';
-import { TodoistClient } from './todoist-client';
+import { TodoistClient, TodoistNotFoundError } from './todoist-client';
 import type { TodoistItem, TodoistSyncSnapshot } from './todoist-client';
 import type { App, TFile } from 'obsidian';
 import { syncLinkedChecklistStates } from './linked-checklist-sync';
 import { type VaultIndex, buildVaultIndexSnapshot } from './vault-index';
 import { appendEventsToDailyNote, type DailyNoteEvent } from './daily-note-service';
+import { generateUuid } from './task-frontmatter';
+import { PendingLog } from './pending-log';
 
 	export interface SyncRunResult {
 	ok: boolean;
@@ -20,6 +22,8 @@ import { appendEventsToDailyNote, type DailyNoteEvent } from './daily-note-servi
 	pushedUpdates?: number;
 	linkedChecklistUpdates?: number;
 	syncToken?: string;
+	/** True only when the snapshot was fully applied to the vault — gates lastSyncToken persistence. */
+	tokenSafe?: boolean;
 	phaseErrors?: string[];
 }
 
@@ -29,19 +33,34 @@ export class SyncService {
 	private readonly token: string;
 	private readonly lastSyncToken: string | null;
 	private readonly vaultIndex: VaultIndex | null;
+	private readonly pendingLog: PendingLog;
 
-	constructor(app: App, settings: TaskTodoistSettings, token: string, lastSyncToken: string | null = null, vaultIndex: VaultIndex | null = null) {
+	constructor(app: App, settings: TaskTodoistSettings, token: string, lastSyncToken: string | null = null, vaultIndex: VaultIndex | null = null, pluginId = 'obsidian-task-todoist') {
 		this.app = app;
 		this.settings = settings;
 		this.token = token;
 		this.lastSyncToken = lastSyncToken;
 		this.vaultIndex = vaultIndex;
+		this.pendingLog = new PendingLog(app, pluginId);
 	}
 
 	async runImportSync(): Promise<SyncRunResult> {
 		const todoistClient = new TodoistClient(this.token);
 		const repository = new TaskNoteRepository(this.app, this.settings, this.vaultIndex ?? undefined);
 		const phaseErrors: string[] = [];
+		// True only while the snapshot is being fully applied to the vault. Cleared if
+		// the import/missing phases error or are skipped, so the sync token is not
+		// persisted as if everything were processed (T1.6).
+		let snapshotApplyClean = true;
+
+		// T1.7: capture every markdown file's mtime at the very start, before any
+		// network round-trips. A long sync can take many seconds; if the user edits a
+		// note meanwhile, updateTaskFile() compares against this snapshot and refuses
+		// to clobber the fresh edit.
+		const fileMtimeAtStart = new Map<string, number>();
+		for (const f of this.app.vault.getMarkdownFiles()) {
+			fileMtimeAtStart.set(f.path, f.stat.mtime);
+		}
 
 		// Phase 1: pre-flight repairs (non-critical — failures don't block sync)
 		try {
@@ -51,12 +70,22 @@ export class SyncService {
 			phaseErrors.push(`Pre-flight: ${errorMessage(e)}`);
 		}
 
-		// Phase 2: fetch recently-deleted IDs (non-critical — fall back to empty set)
+		// Phase 2: fetch recently-deleted IDs. If this lookup fails we cannot reliably
+		// tell deleted tasks apart from completed ones, so we flag it and skip the
+		// missing-task phase entirely rather than guess (T1.5).
 		let recentlyDeletedIds = new Set<string>();
+		let deletedIdsReliable = true;
 		try {
-			recentlyDeletedIds = await todoistClient.fetchRecentlyDeletedTaskIds(50);
+			const deletedResult = await todoistClient.fetchRecentlyDeletedTaskIds(50);
+			if (deletedResult.ok) {
+				recentlyDeletedIds = deletedResult.ids;
+			} else {
+				deletedIdsReliable = false;
+				phaseErrors.push(`Deleted-IDs fetch failed (${deletedResult.reason}) — skipping deleted/completed handling this run`);
+			}
 		} catch (e) {
-			phaseErrors.push(`Deleted-IDs fetch: ${errorMessage(e)}`);
+			deletedIdsReliable = false;
+			phaseErrors.push(`Deleted-IDs fetch: ${errorMessage(e)} — skipping deleted/completed handling this run`);
 		}
 
 		// Phase 3: first snapshot + project lookup (critical — abort if this fails)
@@ -68,6 +97,28 @@ export class SyncService {
 			return { ok: false, message: `Todoist sync failed: ${message}` };
 		}
 		const projectIdByName = new Map(snapshot.projects.map((project) => [project.name.toLowerCase(), project.id]));
+
+		// Phase 3b: recover in-flight creates from a previous crashed run (T1.1/T1.2).
+		// Surface any leftover write-ahead entries, then reconcile notes whose
+		// todoist_pending_id was written but never confirmed: adopt the matching
+		// remote task (no duplicate) or clear the marker so it is re-dispatched.
+		try {
+			await this.pendingLog.load();
+			const leftover = this.pendingLog.list();
+			if (leftover.length > 0) {
+				const titles = leftover.slice(0, 5).map((e) => `"${e.title}"`).join(', ');
+				const extra = leftover.length > 5 ? ` …and ${leftover.length - 5} more` : '';
+				phaseErrors.push(`Recovered ${leftover.length} in-flight create(s) from a previous run: ${titles}${extra}`);
+			}
+			const recon = await repository.reconcilePendingCreates(snapshot.items, fileMtimeAtStart);
+			if (recon.adopted > 0 || recon.recreated > 0) {
+				console.log(`[TaskTodoist] Reconciled pending creates: ${recon.adopted} adopted, ${recon.recreated} re-dispatched.`);
+			}
+			// Frontmatter is now the source of truth for recovery — clear the log.
+			await this.pendingLog.clearAll();
+		} catch (e) {
+			phaseErrors.push(`Reconcile pending creates: ${errorMessage(e)}`);
+		}
 
 		// Phase 4: push pending local creates (per-item errors are non-critical)
 		let pendingLocalCreates: Awaited<ReturnType<typeof repository.listPendingLocalCreates>> = [];
@@ -94,6 +145,19 @@ export class SyncService {
 				const dueDate = pending.dueDate?.trim() || undefined;
 				const dueString = pending.dueString?.trim() || undefined;
 				const createDeadline = pending.deadline?.trim() || undefined;
+				// Write-ahead: persist a locally-generated pending ID to the note AND the
+				// write-ahead log BEFORE the network call. If we crash mid-create, the
+				// note is skipped by listPendingLocalCreates() and recovered by
+				// reconcilePendingCreates() — never duplicated (T1.1/T1.2).
+				const pendingUuid = generateUuid();
+				await repository.markCreatePending(pending.file, pendingUuid);
+				await this.pendingLog.record({
+					id: pendingUuid,
+					kind: 'task',
+					path: pending.file.path,
+					title: pending.title,
+					dispatchedAt: new Date().toISOString(),
+				});
 				const createdTodoistId = await todoistClient.createTask({
 					content: pending.title,
 					description: pending.description,
@@ -106,9 +170,6 @@ export class SyncService {
 					deadline: createDeadline,
 					duration: pending.duration,
 				});
-				// Write the pending ID immediately so a crash before markLocalCreateSynced()
-				// does not cause a duplicate task on the next sync run.
-				await repository.markCreateDispatched(pending.file, createdTodoistId);
 				if (pending.isDone) {
 					await todoistClient.updateTask({
 						id: createdTodoistId,
@@ -122,6 +183,10 @@ export class SyncService {
 					});
 				}
 				await repository.markLocalCreateSynced(pending.file, createdTodoistId, pending.syncSignature);
+				await this.pendingLog.confirm(pendingUuid);
+				// This sync just wrote the file — rebase its mtime so Phase 7's mtime
+				// guard does not mistake our own write for a concurrent user edit.
+				fileMtimeAtStart.set(pending.file.path, pending.file.stat.mtime);
 			} catch (e) {
 				phaseErrors.push(`Create "${pending.title}": ${errorMessage(e)}`);
 			}
@@ -180,6 +245,8 @@ export class SyncService {
 				if (!pending.isProjectTask) {
 					await repository.renameTaskFileToMatchTitle(pending.file, pending.title);
 				}
+				// Rebase mtime (post-rename path) so the Phase 7 guard ignores our own write.
+				fileMtimeAtStart.set(pending.file.path, pending.file.stat.mtime);
 			} catch (e) {
 				phaseErrors.push(`Update "${pending.title}": ${errorMessage(e)}`);
 			}
@@ -242,9 +309,11 @@ export class SyncService {
 				projectColorById,
 				allProjects: snapshot.projects.filter((p) => !p.is_archived),
 				allSections: snapshot.sections.filter((s) => !s.is_archived),
+				fileMtimeAtStart,
 			});
 		} catch (e) {
 			phaseErrors.push(`Import: ${errorMessage(e)}`);
+			snapshotApplyClean = false;
 		}
 
 		// Get a fresh vault snapshot (Phase 7 invalidated the index) for project note lookups
@@ -273,8 +342,14 @@ export class SyncService {
 			}
 		}
 
-		// Phase 8: handle missing/deleted remote tasks (non-critical)
+		// Phase 8: handle missing/deleted remote tasks (non-critical).
+		// Skipped entirely when the deleted-ID lookup failed (T1.5): without it we
+		// cannot tell a deleted task from a completed one, and guessing risks either
+		// orphaning deleted tasks or wrongly archiving live ones.
 		let missingHandled = 0;
+		if (!deletedIdsReliable) {
+			snapshotApplyClean = false;
+		} else {
 		try {
 			const missingEntries = findMissingEntries(existingSyncedTasks, activeItemById, recentlyDeletedIds);
 
@@ -307,9 +382,11 @@ export class SyncService {
 				}
 			}
 
-			missingHandled = await repository.applyMissingRemoteTasks(missingEntries);
+			missingHandled = await repository.applyMissingRemoteTasks(missingEntries, phaseErrors);
 		} catch (e) {
 			phaseErrors.push(`Missing tasks: ${errorMessage(e)}`);
+			snapshotApplyClean = false;
+		}
 		}
 
 		// Phase 8b: detect task notes whose Todoist project no longer exists (non-critical)
@@ -347,6 +424,14 @@ export class SyncService {
 						const vaultName = encodeURIComponent(this.app.vault.getName());
 						const filePath = encodeURIComponent(pending.file.path);
 						const obsidianUri = `obsidian://open?vault=${vaultName}&file=${filePath}`;
+						const projectLogId = generateUuid();
+						await this.pendingLog.record({
+							id: projectLogId,
+							kind: 'project',
+							path: pending.file.path,
+							title: pending.projectName,
+							dispatchedAt: new Date().toISOString(),
+						});
 						const createdTaskId = await todoistClient.createTask({
 							content: `* ${pending.projectName} [+](${obsidianUri})`,
 							description: pending.description || undefined,
@@ -359,6 +444,7 @@ export class SyncService {
 							duration: pending.duration,
 						});
 						await repository.markProjectTaskCreated(pending.file, createdTaskId);
+						await this.pendingLog.confirm(projectLogId);
 						projectTasksCreated += 1;
 					} catch (e) {
 						phaseErrors.push(`Project task "${pending.projectName}": ${errorMessage(e)}`);
@@ -454,8 +540,13 @@ export class SyncService {
 
 				// Task is active in Todoist
 				if (isStopStatus) {
-					// Note says stop → delete the Todoist task and stop syncing
-					await todoistClient.deleteTask(entry.noteTaskId);
+					// Note says stop → delete the Todoist task and stop syncing.
+					// A 404 means it is already gone — the desired end state — so still stop.
+					try {
+						await todoistClient.deleteTask(entry.noteTaskId);
+					} catch (delErr) {
+						if (!(delErr instanceof TodoistNotFoundError)) throw delErr;
+					}
 					await repository.markNoteTaskStopped(entry.file);
 					continue;
 				}
@@ -473,20 +564,32 @@ export class SyncService {
 					// to restore the item to its original section, undoing the item_move.
 					const remoteChecked = Boolean(remoteItem.checked);
 					const needsStatusChange = isDoneStatus !== remoteChecked;
-					await todoistClient.updateTask({
-						id: entry.noteTaskId,
-						content: newContent,
-						description: entry.description,
-						isDone: needsStatusChange ? isDoneStatus : undefined,
-						priority: entry.priority,
-						labels: entry.labels,
-						dueDate: entry.dueDate?.trim(),
-						dueString: entry.dueString?.trim(),
-						clearDue: !entry.dueDate && !entry.dueString,
-						deadline: entry.deadline?.trim(),
-						clearDeadline: !entry.deadline,
-						sectionId: noteTaskSectionId,
-					});
+					try {
+						await todoistClient.updateTask({
+							id: entry.noteTaskId,
+							content: newContent,
+							description: entry.description,
+							isDone: needsStatusChange ? isDoneStatus : undefined,
+							priority: entry.priority,
+							labels: entry.labels,
+							dueDate: entry.dueDate?.trim(),
+							dueString: entry.dueString?.trim(),
+							clearDue: !entry.dueDate && !entry.dueString,
+							deadline: entry.deadline?.trim(),
+							clearDeadline: !entry.deadline,
+							sectionId: noteTaskSectionId,
+						});
+					} catch (pushErr) {
+						if (pushErr instanceof TodoistNotFoundError) {
+							// The linked Todoist task vanished. Clear the dead link so the
+							// note stops no-op'ing every sync; it will be re-created if it
+							// still matches auto-create rules, else left for review.
+							await repository.clearNoteTaskLink(entry.file);
+							phaseErrors.push(`NoteTask "${entry.noteTitle}": linked Todoist task no longer exists — cleared the link`);
+							continue;
+						}
+						throw pushErr;
+					}
 					await repository.markNoteTaskSyncedAt(entry.file);
 					noteTasksUpdated += 1;
 				} else {
@@ -552,6 +655,14 @@ export class SyncService {
 					: 0;
 				const noteTaskOrder = minOrder > 0 ? minOrder - 1 : minOrder;
 
+				const noteTaskLogId = generateUuid();
+				await this.pendingLog.record({
+					id: noteTaskLogId,
+					kind: 'noteTask',
+					path: pending.file.path,
+					title: pending.title,
+					dispatchedAt: new Date().toISOString(),
+				});
 				const createdTaskId = await todoistClient.createTask({
 					content: `${pending.title} [+](${obsidianUri})`,
 					projectId: resolvedNoteTaskProjectId,
@@ -560,6 +671,7 @@ export class SyncService {
 					labels: pending.labels,
 				});
 				await repository.markNoteTaskCreated(pending.file, createdTaskId);
+				await this.pendingLog.confirm(noteTaskLogId);
 				noteTasksAutoCreated += 1;
 			} catch (e) {
 				phaseErrors.push(`NoteTask auto-create "${pending.title}": ${errorMessage(e)}`);
@@ -630,6 +742,9 @@ export class SyncService {
 			pushedUpdates: pendingLocalUpdates.length,
 			linkedChecklistUpdates,
 			syncToken: snapshot.syncToken || undefined,
+			// Persist the token only when the snapshot was fully applied — otherwise the
+			// next sync would assume it already processed changes it actually skipped (T1.6).
+			tokenSafe: snapshotApplyClean,
 			phaseErrors: phaseErrors.length > 0 ? phaseErrors : undefined,
 		};
 	}
